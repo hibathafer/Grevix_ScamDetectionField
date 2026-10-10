@@ -98,6 +98,41 @@ reasons → recommendation → limitation note.
 | Clipboard "paste" button | Native long-press paste already works; the button would need platform permission handling on Android |
 | Grammar/spelling quality scoring | Subjective, noisy, and unfair to non-native English speakers and to short messages |
 
+### Verification performed (initial build)
+
+* `flutter analyze` — **No issues found**.
+* `flutter test` — **50/50 passed** (URL rules, message rules, input
+  detection, engine, AI success/error/network/invalid-response fallbacks,
+  and 6 widget tests covering the full UI flow).
+* `flutter build apk --release` — succeeded:
+  `build/app/outputs/flutter-apk/app-release.apk` (47.0 MB).
+* `flutter build web --release` — succeeded.
+* **Live run check** (release web build served locally, opened in a browser):
+  * Home screen renders correctly (screenshot taken).
+  * Empty input → friendly inline error, no crash.
+  * Example link → `HIGH RISK`, "Link analysis", 5 signals, reasons with
+    explanations, recommendation, limitation note, "About this analysis".
+  * Example message → `HIGH RISK`, "Message analysis", 8 signals
+    (3 strong / 5 warnings / 1 context note), reasons mixing message and link
+    sources, recommendation mentioning the password request.
+  * Navigation back to home works.
+  * Console: **no warnings or errors** after a clean reload and a full
+    interaction round.
+* **Secret scan before publishing**: `sk-`, `api_key`, `token`, `secret`,
+  `Bearer`, `ghp_`, private-key markers → only code references, rule keywords
+  and the `sk-...` placeholder shown in the README example. No real credential
+  is present in the repository.
+
+### Repository
+
+* Repository initialised in `scam_detection_field/`, branch `main`.
+* Remote: `https://github.com/hibathafer/Grevix_ScamDetectionField.git`.
+* Push verified with `git ls-remote` — remote `refs/heads/main` matches the
+  local commit.
+* `.gitignore` extended to exclude `android/key.properties`, `*.jks`,
+  `*.keystore`, `*.p12`, `.env*` and `.kotlin/`; the Gradle wrapper files are
+  committed on purpose so a clean clone can build.
+
 ---
 
 ## 2. Challenge Card #1

@@ -196,6 +196,10 @@ flutter build apk --release
   part of the default build.
 * Built and tested on Windows: the APK is produced and verified; the iOS
   bundle was not built in this environment.
+* The release APK is signed with the default debug keystore (Flutter
+  template default), which installs and runs normally. A dedicated release
+  keystore would be needed only for store-grade publishing, and would be kept
+  out of version control.
 
 ## Challenge evolution
 
