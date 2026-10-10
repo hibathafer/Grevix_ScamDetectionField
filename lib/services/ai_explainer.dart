@@ -1,0 +1,206 @@
+import 'dart:convert';
+
+import 'package:http/http.dart' as http;
+
+import '../models/analysis_result.dart';
+
+/// Configuration for the optional AI explanation step.
+///
+/// The key is never written to source code. It is injected at build/run time:
+///
+/// ```
+/// flutter run --dart-define=AI_API_KEY=... --dart-define=AI_MODEL=gpt-4o-mini
+/// ```
+class AiConfig {
+  const AiConfig({
+    required this.apiKey,
+    required this.baseUrl,
+    required this.model,
+  });
+
+  const AiConfig.empty()
+      : apiKey = '',
+        baseUrl = 'https://api.openai.com/v1',
+        model = 'gpt-4o-mini';
+
+  final String apiKey;
+  final String baseUrl;
+  final String model;
+
+  /// Reads configuration passed with `--dart-define`.
+  factory AiConfig.fromEnvironment() => const AiConfig(
+        apiKey: String.fromEnvironment('AI_API_KEY'),
+        baseUrl: String.fromEnvironment(
+          'AI_BASE_URL',
+          defaultValue: 'https://api.openai.com/v1',
+        ),
+        model: String.fromEnvironment(
+          'AI_MODEL',
+          defaultValue: 'gpt-4o-mini',
+        ),
+      );
+
+  bool get enabled => apiKey.trim().isNotEmpty;
+}
+
+/// Plain-language explanation returned by the model.
+class AiExplanation {
+  const AiExplanation({required this.summary, this.observations = const []});
+
+  final String summary;
+  final List<String> observations;
+}
+
+/// Optional AI step: it never sets the risk level, it only explains the
+/// signals that the deterministic rules already found.
+class AiExplainer {
+  AiExplainer(this.config, {http.Client? client}) : _overrideClient = client;
+
+  factory AiExplainer.fromEnvironment() =>
+      AiExplainer(AiConfig.fromEnvironment());
+
+  final AiConfig config;
+  final http.Client? _overrideClient;
+  http.Client? _ownClient;
+
+  /// Only created when AI is actually used, so no socket is opened in builds
+  /// without an AI configuration.
+  http.Client get _client {
+    final override = _overrideClient;
+    if (override != null) return override;
+    return _ownClient ??= http.Client();
+  }
+
+  static const Duration timeout = Duration(seconds: 20);
+
+  /// Returns `null` when AI is not configured or the call fails; the caller
+  /// then falls back to the built-in explanations.
+  Future<AiExplanation?> explain({
+    required String input,
+    required InputKind kind,
+    required RiskLevel riskLevel,
+    required List<Indicator> indicators,
+  }) async {
+    if (!config.enabled) return null;
+
+    final endpoint = Uri.parse(
+      '${_normaliseBaseUrl(config.baseUrl)}/chat/completions',
+    );
+
+    final payload = {
+      'model': config.model,
+      'temperature': 0.2,
+      'max_tokens': 400,
+      'messages': [
+        {
+          'role': 'system',
+          'content':
+              'You explain to an everyday user why a ${kind.name} looks '
+              'suspicious. Be concrete, calm and honest. Never invent facts, '
+              'never claim certainty, and never say the item definitely is or '
+              'is not a scam. Reply with JSON only in this exact shape: '
+              '{"summary": "2-3 sentences a non-technical person can follow", '
+              '"observations": ["short point", "short point"]} '
+              'with 1 to 3 observations.',
+        },
+        {
+          'role': 'user',
+          'content': jsonEncode({
+            'risk_level': riskLevel.name.toUpperCase(),
+            'input': input,
+            'signals': [
+              for (final i in indicators)
+                {
+                  'id': i.id,
+                  'severity': i.severity.name,
+                  'title': i.title,
+                  'why': i.explanation,
+                },
+            ],
+          }),
+        },
+      ],
+    };
+
+    final response = await _client
+        .post(
+          endpoint,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ${config.apiKey}',
+          },
+          body: jsonEncode(payload),
+        )
+        .timeout(timeout);
+
+    if (response.statusCode != 200) return null;
+
+    final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+    if (decoded is! Map) return null;
+    final choices = decoded['choices'];
+    if (choices is! List || choices.isEmpty) return null;
+    final firstChoice = choices.first;
+    final message = firstChoice is Map ? firstChoice['message'] : null;
+    final content = message is Map ? message['content'] : null;
+    if (content is! String || content.trim().isEmpty) return null;
+
+    return _parse(content.trim());
+  }
+
+  static String _normaliseBaseUrl(String url) {
+    var u = url.trim();
+    while (u.endsWith('/')) {
+      u = u.substring(0, u.length - 1);
+    }
+    return u;
+  }
+
+  /// Accepts strict JSON, and also a model that answered in plain prose.
+  static AiExplanation? _parse(String content) {
+    var text = content;
+    if (text.startsWith('```')) {
+      text = text.replaceFirst(RegExp(r'^```[a-zA-Z]*\s*'), '');
+      text = text.replaceFirst(RegExp(r'\s*```$'), '');
+    }
+
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is Map) {
+        final summary = decoded['summary'];
+        if (summary is String && summary.trim().isNotEmpty) {
+          final observations = decoded['observations'];
+          return AiExplanation(
+            summary: summary.trim(),
+            observations: observations is List
+                ? observations
+                    .whereType<String>()
+                    .map((s) => s.trim())
+                    .where((s) => s.isNotEmpty)
+                    .take(3)
+                    .toList()
+                : const [],
+          );
+        }
+        // Valid JSON, but not the shape we asked for.
+        return null;
+      }
+      if (decoded is String && decoded.trim().length >= 20) {
+        return AiExplanation(summary: decoded.trim());
+      }
+      return null;
+    } catch (_) {
+      // Not JSON - fall through and use the raw text.
+    }
+
+    final fallback = text.replaceAll('"', '').trim();
+    if (fallback.isEmpty ||
+        fallback.length < 20 ||
+        fallback.startsWith('{') ||
+        fallback.startsWith('[')) {
+      return null;
+    }
+    return AiExplanation(
+      summary: fallback.substring(0, fallback.length > 400 ? 400 : fallback.length),
+    );
+  }
+}
