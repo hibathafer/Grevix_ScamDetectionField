@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/strings_scope.dart';
 import '../models/analysis_result.dart';
 import '../theme/app_theme.dart';
 
@@ -83,7 +84,7 @@ class _SourceTag extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = source == IndicatorSource.link ? 'Link' : 'Message';
+    final label = StringsScope.of(context).sourceLabel(source);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
       decoration: BoxDecoration(

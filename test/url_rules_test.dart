@@ -38,8 +38,25 @@ void main() {
       final findings =
           analyzeLink('http://paypal-secure-login.verify-account.xyz/session/update');
       expect(findings.map((i) => i.id), contains('brand_impersonation'));
-      expect(findings.map((i) => i.id), contains('suspicious_domain_words'));
       expect(findings.map((i) => i.id), contains('suspicious_tld'));
+      expect(RiskScorer.level(findings), RiskLevel.high);
+    });
+
+    test('credential words already cited by the brand signal are not repeated',
+        () {
+      // brand_impersonation already names "secure", "login", "verify" and
+      // "account". Reporting them a second time as suspicious_domain_words
+      // would present a single piece of evidence as two independent proofs.
+      final findings = analyzeLink(
+          'http://paypal-secure-login.verify-account.xyz/session/update');
+      expect(findings.map((i) => i.id),
+          isNot(contains('suspicious_domain_words')));
+      expect(
+        findings
+            .where((i) => i.severity == IndicatorSeverity.critical)
+            .length,
+        1,
+      );
       expect(RiskScorer.level(findings), RiskLevel.high);
     });
 

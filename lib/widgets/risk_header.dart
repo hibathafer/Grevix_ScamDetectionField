@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/strings_scope.dart';
 import '../models/analysis_result.dart';
 import '../theme/app_theme.dart';
 
@@ -11,8 +12,9 @@ class RiskHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = StringsScope.of(context);
     final color = AppTheme.riskColor(result.riskLevel);
-    final label = AppTheme.riskLabel(result.riskLevel);
+    final label = l10n.riskLabel(result.riskLevel);
 
     return Container(
       width: double.infinity,
@@ -75,9 +77,7 @@ class RiskHeader extends StatelessWidget {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            result.kind == InputKind.link
-                                ? 'Link analysis'
-                                : 'Message analysis',
+                            l10n.analysisKind(result.kind),
                             style: const TextStyle(
                               fontSize: 13,
                               color: Color(0xFF5B6B7C),
@@ -86,7 +86,10 @@ class RiskHeader extends StatelessWidget {
                         ],
                       ),
                     ),
-                    _SignalBadge(count: result.signalCount, color: color),
+                    _SignalBadge(
+                      text: l10n.signalCount(result.signalCount),
+                      color: color,
+                    ),
                   ],
                 ),
                 const SizedBox(height: 14),
@@ -105,18 +108,16 @@ class RiskHeader extends StatelessWidget {
                   runSpacing: 8,
                   children: [
                     _Pill(
-                      text: '${result.criticalCount} strong signal'
-                          '${result.criticalCount == 1 ? '' : 's'}',
+                      text: l10n.strongSignalCount(result.criticalCount),
                       color: AppTheme.high,
                     ),
                     _Pill(
-                      text: '${result.warningCount} warning'
-                          '${result.warningCount == 1 ? '' : 's'}',
+                      text: l10n.warningCount(result.warningCount),
                       color: AppTheme.medium,
                     ),
                     _Pill(
-                      text: '${result.contextNotes.length} context note'
-                          '${result.contextNotes.length == 1 ? '' : 's'}',
+                      text:
+                          l10n.contextNoteCount(result.contextNotes.length),
                       color: const Color(0xFF5B6B7C),
                     ),
                   ],
@@ -137,9 +138,9 @@ class RiskHeader extends StatelessWidget {
 }
 
 class _SignalBadge extends StatelessWidget {
-  const _SignalBadge({required this.count, required this.color});
+  const _SignalBadge({required this.text, required this.color});
 
-  final int count;
+  final String text;
   final Color color;
 
   @override
@@ -152,7 +153,7 @@ class _SignalBadge extends StatelessWidget {
         border: Border.all(color: const Color(0xFFE1E7F0)),
       ),
       child: Text(
-        '$count signal${count == 1 ? '' : 's'}',
+        text,
         style: const TextStyle(
           fontSize: 12.5,
           fontWeight: FontWeight.w700,

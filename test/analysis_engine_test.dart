@@ -157,6 +157,65 @@ void main() {
       expect(result.riskLevel, RiskLevel.high);
     });
 
+    test('the same code can drive an OpenAI-compatible Gemini endpoint',
+        () async {
+      // Google exposes an OpenAI-compatible surface, so using Gemini needs no
+      // code change - only build-time configuration. This pins the request
+      // shape and the trailing-slash normalisation. It uses a mock client, so
+      // no network call is made and no real key is involved.
+      const geminiBase =
+          'https://generativelanguage.googleapis.com/v1beta/openai/';
+      late Uri called;
+
+      final explainer = AiExplainer(
+        const AiConfig(
+          apiKey: 'not-a-real-key',
+          baseUrl: geminiBase,
+          model: 'gemini-2.0-flash',
+        ),
+        client: MockClient((request) async {
+          called = request.url;
+          expect(request.method, 'POST');
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(body['model'], 'gemini-2.0-flash');
+          return http.Response(
+            jsonEncode({
+              'choices': [
+                {
+                  'message': {
+                    'content': jsonEncode({
+                      'summary':
+                          'A short, plain-language summary that the parser '
+                              'will accept without any problem.',
+                    }),
+                  },
+                },
+              ],
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+
+      final explanation = await explainer.explain(
+        input: _scamLink,
+        kind: InputKind.link,
+        riskLevel: RiskLevel.high,
+        indicators: const [],
+      );
+
+      expect(
+        called.toString(),
+        'https://generativelanguage.googleapis.com/v1beta/openai/'
+        'chat/completions',
+        reason: 'the trailing slash must not produce a doubled or missing '
+            'path segment',
+      );
+      expect(explanation, isNotNull);
+      expect(explanation!.summary, contains('plain-language summary'));
+    });
+
     test('an API error falls back to the rules without crashing', () async {
       final explainer =
           _explainerWith(MockClient((request) async => http.Response(

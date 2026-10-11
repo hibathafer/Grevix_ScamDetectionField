@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_strings.dart';
+import '../l10n/strings_scope.dart';
 import '../models/analysis_result.dart';
 import '../theme/app_theme.dart';
 import '../widgets/indicator_tile.dart';
@@ -15,15 +17,16 @@ class ResultScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = StringsScope.of(context);
     final reasons = result.reasons;
     final notes = result.contextNotes;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Analysis result'),
+        title: Text(l10n.resultTitle),
         actions: [
           IconButton(
-            tooltip: 'Analyse another',
+            tooltip: l10n.analyseAnother,
             icon: const Icon(Icons.refresh_rounded),
             onPressed: () => Navigator.of(context).pop(),
           ),
@@ -39,10 +42,10 @@ class ResultScreen extends StatelessWidget {
               const SizedBox(height: 14),
               if (result.aiSummary != null) _AiCard(result: result),
               SectionCard(
-                title: 'Why this result',
+                title: l10n.whyThisResult,
                 icon: Icons.rule_rounded,
                 child: reasons.isEmpty
-                    ? const _NoSignals()
+                    ? _NoSignals(text: l10n.noSignalsTitle)
                     : Column(
                         children: [
                           for (final indicator in reasons)
@@ -53,7 +56,7 @@ class ResultScreen extends StatelessWidget {
               if (notes.isNotEmpty) ...[
                 const SizedBox(height: 14),
                 SectionCard(
-                  title: 'Context notes',
+                  title: l10n.contextNotes,
                   icon: Icons.notes_rounded,
                   child: Column(
                     children: [
@@ -65,7 +68,7 @@ class ResultScreen extends StatelessWidget {
               ],
               const SizedBox(height: 14),
               SectionCard(
-                title: 'What you should do',
+                title: l10n.whatToDo,
                 icon: Icons.directions_outlined,
                 child: Container(
                   width: double.infinity,
@@ -88,13 +91,13 @@ class ResultScreen extends StatelessWidget {
               ),
               const SizedBox(height: 14),
               SectionCard(
-                title: 'About this analysis',
+                title: l10n.aboutThisAnalysis,
                 icon: Icons.info_outline_rounded,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _modeText(result.mode),
+                      l10n.modeText(result.mode),
                       style: const TextStyle(
                         fontSize: 13.5,
                         height: 1.5,
@@ -102,23 +105,35 @@ class ResultScreen extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 10),
-                    const Text(
-                      'Limitation: this result highlights common warning '
-                      'signs. It cannot prove that something is safe, and it '
-                      'does not open or download any link. Always verify '
-                      'unexpected requests through an official channel.',
-                      style: TextStyle(
+                    Text(
+                      l10n.limitationNote,
+                      style: const TextStyle(
                         fontSize: 13,
                         height: 1.5,
                         color: Color(0xFF7A8798),
                       ),
                     ),
+                    // Repeat the language-coverage caveat on the result so a
+                    // shared/screenshot result is never read out of context.
+                    if (l10n.detectionCoverageNote != null) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        l10n.detectionCoverageNote!,
+                        key: const ValueKey('coverage-note'),
+                        style: const TextStyle(
+                          fontSize: 13,
+                          height: 1.5,
+                          color: Color(0xFF8A6A16),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 10),
                     Text(
-                      'Analysed ${result.analyzedAt.hour.toString().padLeft(2, '0')}:'
-                      '${result.analyzedAt.minute.toString().padLeft(2, '0')}'
-                      ' - ${result.indicators.length} rule checks matched '
-                      'their patterns.',
+                      l10n.analysedAt(
+                        '${_two(result.analyzedAt.hour)}:'
+                        '${_two(result.analyzedAt.minute)}',
+                        result.indicators.length,
+                      ),
                       style: const TextStyle(
                         fontSize: 12,
                         color: Color(0xFF95A1B2),
@@ -137,7 +152,7 @@ class ResultScreen extends StatelessWidget {
                       style: OutlinedButton.styleFrom(
                         minimumSize: const Size.fromHeight(54),
                       ),
-                      child: const Text('Analyse another'),
+                      child: Text(l10n.analyseAnother),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -148,7 +163,7 @@ class ResultScreen extends StatelessWidget {
                       style: FilledButton.styleFrom(
                         minimumSize: const Size.fromHeight(54),
                       ),
-                      child: const Text('Copy report'),
+                      child: Text(l10n.copyReport),
                     ),
                   ),
                 ],
@@ -160,68 +175,60 @@ class ResultScreen extends StatelessWidget {
     );
   }
 
-  String _modeText(AnalysisMode mode) => switch (mode) {
-        AnalysisMode.rulesOnly =>
-          'The risk level and every reason above come from the app\'s '
-              'built-in rules. No AI service is configured in this build.',
-        AnalysisMode.rulesAndAi =>
-          'The risk level and the reasons above come from the app\'s built-in '
-              'rules. An external AI model was asked to add the plain-language '
-              'explanation. The AI does not change the risk level.',
-        AnalysisMode.rulesWithAiFallback =>
-          'The risk level and the reasons above come from the app\'s built-in '
-              'rules. An AI explanation was requested but could not be '
-              'completed, so only the rules are shown.',
-      };
+  static String _two(int value) => value.toString().padLeft(2, '0');
 
-  String buildReport() {
+  /// Plain-text report, in whichever language is active right now.
+  ///
+  /// The user's own input is reproduced verbatim (only truncated at 400
+  /// characters for very long pastes), and URLs inside it are never rewritten.
+  String buildReport(AppStrings l10n) {
     final buffer = StringBuffer()
-      ..writeln('Scam Detection Field - ${AppTheme.riskLabel(result.riskLevel)}')
-      ..writeln('Input (${result.kind.name}):')
+      ..writeln(l10n.reportHeader(result.riskLevel))
+      ..writeln(l10n.reportInputLabel(result.kind))
       ..writeln(result.inputPreview.length > 400
           ? '${result.inputPreview.substring(0, 400)}...'
           : result.inputPreview)
       ..writeln()
-      ..writeln('Why:');
+      ..writeln(l10n.reportWhyHeading);
 
     if (result.reasons.isEmpty) {
-      buffer.writeln('- No warning signs matched.');
+      buffer.writeln(l10n.reportNoSignals);
     } else {
       for (final i in result.reasons) {
-        buffer.writeln('- ${i.title}: ${i.explanation}');
+        buffer.writeln(l10n.reportReasonLine(i.title, i.explanation));
       }
     }
     if (result.aiSummary != null) {
       buffer
         ..writeln()
-        ..writeln('AI explanation:')
+        ..writeln(l10n.reportAiHeading)
         ..writeln(result.aiSummary);
     }
     buffer
       ..writeln()
-      ..writeln('What to do:')
+      ..writeln(l10n.reportWhatToDoHeading)
       ..writeln(result.recommendation)
       ..writeln()
-      ..writeln(
-        'Note: highlights common warning signs only - not a guarantee that '
-        'something is or is not a scam.',
-      );
+      ..writeln('${l10n.reportNoteHeading} ${l10n.reportNoteBody}');
     return buffer.toString();
   }
 
   Future<void> _copyReport(BuildContext context) async {
-    await copyToClipboard(buildReport());
+    final l10n = StringsScope.read(context);
+    await copyToClipboard(buildReport(l10n));
     if (!context.mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
-        const SnackBar(content: Text('Report copied to clipboard')),
+        SnackBar(content: Text(l10n.reportCopied)),
       );
   }
 }
 
 class _NoSignals extends StatelessWidget {
-  const _NoSignals();
+  const _NoSignals({required this.text});
+
+  final String text;
 
   @override
   Widget build(BuildContext context) {
@@ -232,18 +239,16 @@ class _NoSignals extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppTheme.low.withValues(alpha: 0.25)),
       ),
-      child: const Row(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.check_circle_outline_rounded,
+          const Icon(Icons.check_circle_outline_rounded,
               color: AppTheme.low, size: 20),
-          SizedBox(width: 10),
+          const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'None of the built-in warning patterns matched this input. That '
-              'is a good sign, but it is not a guarantee - stay careful with '
-              'unexpected requests.',
-              style: TextStyle(
+              text,
+              style: const TextStyle(
                 fontSize: 13.5,
                 height: 1.45,
                 color: Color(0xFF46566B),
@@ -263,11 +268,12 @@ class _AiCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = StringsScope.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SectionCard(
-          title: 'AI explanation',
+          title: l10n.aiExplanationTitle,
           icon: Icons.auto_awesome_outlined,
           trailing: Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -275,9 +281,9 @@ class _AiCard extends StatelessWidget {
               color: const Color(0xFFEEE9FF),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: const Text(
-              'external model',
-              style: TextStyle(
+            child: Text(
+              l10n.aiExternalBadge,
+              style: const TextStyle(
                 fontSize: 10.5,
                 fontWeight: FontWeight.w700,
                 color: Color(0xFF5B3FBF),

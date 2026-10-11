@@ -47,27 +47,50 @@ class Indicator {
     required this.explanation,
     required this.severity,
     required this.source,
+    this.params = const <String, String>{},
   });
 
   /// Stable identifier, used for de-duplication and tests.
+  ///
+  /// The id never changes with the display language: it identifies the rule.
   final String id;
 
   /// Short human label, e.g. "Urgency language".
+  ///
+  /// Always produced in English by the rules. The display layer may replace it
+  /// with a translated equivalent; see [AppStrings.indicatorTitle].
   final String title;
 
   /// Plain-English reason this signal matters.
+  ///
+  /// Always produced in English by the rules. The display layer may replace it
+  /// with a translated equivalent; see [AppStrings.indicatorExplanation].
   final String explanation;
 
   final IndicatorSeverity severity;
 
   final IndicatorSource source;
 
-  Indicator copyWith({IndicatorSource? source}) => Indicator(
+  /// Values that were interpolated into [title] / [explanation], keyed by a
+  /// stable name (`brand`, `tld`, `count`, ...).
+  ///
+  /// Kept separately so a translated string can be rebuilt from the same
+  /// facts instead of being scraped out of the English sentence.
+  final Map<String, String> params;
+
+  Indicator copyWith({
+    IndicatorSource? source,
+    String? title,
+    String? explanation,
+    Map<String, String>? params,
+  }) =>
+      Indicator(
         id: id,
-        title: title,
-        explanation: explanation,
+        title: title ?? this.title,
+        explanation: explanation ?? this.explanation,
         severity: severity,
         source: source ?? this.source,
+        params: params ?? this.params,
       );
 }
 

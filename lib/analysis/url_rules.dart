@@ -153,6 +153,35 @@ const brandDomains = <String, String>{
   'unionbank': 'unionbank.com',
 };
 
+/// Extra domains genuinely operated by the brand above.
+///
+/// Brand matching compares whole labels, but even a correct label match can
+/// point at a real regional or product domain of that brand (`amazon.co.uk`,
+/// `microsoftonline.com`). Domain structure alone can never prove a site is
+/// safe, so this is a short, explicit, reviewable list rather than a guess -
+/// anything not listed here is still reported for human judgement.
+const officialAlternateDomains = <String, Set<String>>{
+  'amazon': {
+    'amazon.co.uk',
+    'amazon.de',
+    'amazon.fr',
+    'amazon.es',
+    'amazon.it',
+    'amazon.co.jp',
+    'amazon.ae',
+    'amazon.com.mx',
+    'amazon.com.br',
+  },
+  'microsoft': {'microsoftonline.com', 'live.com', 'office.com', 'office365.com'},
+  'paypal': {'paypal.me'},
+  'google': {'google.co.uk', 'google.de', 'google.fr', 'google.com.au'},
+  'facebook': {'facebook.co.uk', 'facebook.de'},
+  'ebay': {'ebay.co.uk', 'ebay.de'},
+  'apple': {'icloud.com'},
+  'whatsapp': {'whatsapp.net'},
+  'steam': {'steamcommunity.com'},
+};
+
 /// Extensions that almost never arrive through an innocent link.
 const dangerousExtensions = <String>{
   'exe',
@@ -212,14 +241,16 @@ Indicator _hit(
   String id,
   String title,
   String explanation,
-  IndicatorSeverity severity,
-) =>
+  IndicatorSeverity severity, {
+  Map<String, String> params = const <String, String>{},
+}) =>
     Indicator(
       id: id,
       title: title,
       explanation: explanation,
       severity: severity,
       source: IndicatorSource.link,
+      params: params,
     );
 
 bool _isPrivateOrReservedIp(String host) {
@@ -250,6 +281,38 @@ List<String> _tokens(String host) => host
     .split(RegExp(r'[^a-z0-9]+'))
     .where((t) => t.isNotEmpty)
     .toList();
+
+/// Credential wording glued to the edge of a label, removed one piece at a
+/// time so that "securepaypal" or "paypalsecure" still resolve to the label
+/// "paypal".
+///
+/// Deliberately narrow: only the known credential vocabulary is removed, and
+/// a meaningful remainder must survive. "pineapple" and "purchase" are
+/// untouched, so this does not restore raw substring matching.
+Set<String> _strippedCredentialWords(String label, Set<String> affixes) {
+  final stripped = <String>{};
+  var current = label;
+  var changed = true;
+  while (changed) {
+    changed = false;
+    for (final affix in affixes) {
+      if (current.length <= affix.length + 3) continue;
+      if (current.startsWith(affix)) {
+        stripped.add(affix);
+        current = current.substring(affix.length);
+        changed = true;
+        break;
+      }
+      if (current.endsWith(affix)) {
+        stripped.add(affix);
+        current = current.substring(0, current.length - affix.length);
+        changed = true;
+        break;
+      }
+    }
+  }
+  return stripped;
+}
 
 /// Host part of a raw, possibly malformed URL string.
 String _rawHost(String raw) {
@@ -337,6 +400,7 @@ List<Indicator> analyzeLink(String rawInput) {
               'website. Scam pages are frequently hosted this way to hide who '
               'runs them.',
       isPrivate ? IndicatorSeverity.warning : IndicatorSeverity.critical,
+      params: {'private': isPrivate ? '1' : '0'},
     ));
   } else if (!host.contains('.')) {
     findings.add(_hit(
@@ -360,6 +424,7 @@ List<Indicator> analyzeLink(String rawInput) {
             'so the site you would actually visit is controlled by someone '
             'else.',
         IndicatorSeverity.critical,
+        params: {'official': entry.value},
       ));
       break;
     }
@@ -369,12 +434,39 @@ List<Indicator> analyzeLink(String rawInput) {
   final accountHits = hostTokens.where(accountWords.contains).toSet();
   final lureHits = hostTokens.where(lureWords.contains).toSet();
 
-  // Brand impersonation: real brand name + credential wording, not official.
+  // Credential wording glued onto a brand label ("securepaypal") is still
+  // credential wording, and the label it hides is still the brand.
+  final brandCandidateLabels = <String>{...hostTokens};
+  for (final token in hostTokens) {
+    final stripped = _strippedCredentialWords(token, accountWords);
+    if (stripped.isEmpty) continue;
+    accountHits.addAll(stripped);
+    var remainder = token;
+    for (final affix in stripped) {
+      if (remainder.startsWith(affix)) {
+        remainder = remainder.substring(affix.length);
+      } else if (remainder.endsWith(affix)) {
+        remainder = remainder.substring(0, remainder.length - affix.length);
+      }
+    }
+    if (remainder.isNotEmpty) brandCandidateLabels.add(remainder);
+  }
+
+  // Brand impersonation: a real brand name present as a whole label, plus
+  // credential wording, on a domain that is not one of the brand's own.
+  //
+  // Matching is label-exact through [hostTokens], never a raw substring:
+  // "pineapple" contains "apple", "purchase" contains "chase" and
+  // "microsoftonline" starts with "microsoft" - none of those impersonate
+  // anyone.
+  var wordsReportedByBrand = <String>{};
   for (final entry in brandDomains.entries) {
     final brand = entry.key;
     final official = entry.value;
     if (host == official || host.endsWith('.$official')) continue;
-    if (!hostTokens.contains(brand) && !host.contains(brand)) continue;
+    final alternates = officialAlternateDomains[brand] ?? const <String>{};
+    if (alternates.any((d) => host == d || host.endsWith('.$d'))) continue;
+    if (!brandCandidateLabels.contains(brand)) continue;
     if (accountHits.isEmpty && !lureHits.contains('pay') && !lureHits.contains('fee')) {
       findings.add(_hit(
         'brand_in_domain',
@@ -383,8 +475,10 @@ List<Indicator> analyzeLink(String rawInput) {
             'site ($official). Brand names inside unrelated domains are a '
             'common way to gain trust.',
         IndicatorSeverity.warning,
+        params: {'brand': brand, 'official': official},
       ));
     } else {
+      wordsReportedByBrand = accountHits;
       findings.add(_hit(
         'brand_impersonation',
         'Impersonates $brand',
@@ -392,29 +486,40 @@ List<Indicator> analyzeLink(String rawInput) {
             '"${(accountHits.toList()..sort()).join('", "')}" while not being '
             'the official $official domain. This is a phishing pattern.',
         IndicatorSeverity.critical,
+        params: {
+          'brand': brand,
+          'official': official,
+          'words': (accountHits.toList()..sort()).join(', '),
+        },
       ));
     }
     break;
   }
 
   // Two or more suspicious words in one domain is a strong signal.
+  //
+  // Words already cited by the brand indicator above are not counted a second
+  // time: the same evidence must not be presented as two independent proofs.
   final combinedWords = <String>{...accountHits, ...lureHits};
-  if (combinedWords.length >= 2) {
+  final unreportedWords = combinedWords.difference(wordsReportedByBrand);
+  if (unreportedWords.length >= 2) {
     findings.add(_hit(
       'suspicious_domain_words',
       'Domain is packed with scam wording',
       'The domain name contains several loaded words at once: '
-          '"${(combinedWords.toList()..sort()).join('", "')}". Legitimate '
+          '"${(unreportedWords.toList()..sort()).join('", "')}". Legitimate '
           'websites rarely need this many triggers in their address.',
       IndicatorSeverity.critical,
+      params: {'words': (unreportedWords.toList()..sort()).join(', ')},
     ));
-  } else if (combinedWords.length == 1) {
+  } else if (unreportedWords.length == 1) {
     findings.add(_hit(
       'suspicious_domain_word',
       'Domain contains a loaded word',
-      'The domain name includes the word "${combinedWords.first}", which is '
+      'The domain name includes the word "${unreportedWords.first}", which is '
           'often used to make a link look urgent or official.',
       IndicatorSeverity.warning,
+      params: {'word': unreportedWords.first},
     ));
   }
 
@@ -427,6 +532,7 @@ List<Indicator> analyzeLink(String rawInput) {
           'nested addresses are often used to make a link look like a long, '
           'official one.',
       IndicatorSeverity.warning,
+      params: {'count': labels.length.toString()},
     ));
   }
 
@@ -439,6 +545,7 @@ List<Indicator> analyzeLink(String rawInput) {
       'The main part of the address contains $hyphens dashes. Randomly '
           'hyphenated domains are common in generated scam links.',
       IndicatorSeverity.warning,
+      params: {'count': hyphens.toString()},
     ));
   }
 
@@ -450,6 +557,7 @@ List<Indicator> analyzeLink(String rawInput) {
       'The address contains $digitsInHost digits, which usually means it was '
           'generated rather than chosen by a real organisation.',
       IndicatorSeverity.info,
+      params: {'count': digitsInHost.toString()},
     ));
   }
 
@@ -461,6 +569,7 @@ List<Indicator> analyzeLink(String rawInput) {
       'Websites ending in ".$tld" are cheap to register in bulk and are '
           'frequently reported for phishing, so treat this link with caution.',
       IndicatorSeverity.warning,
+      params: {'tld': tld},
     ));
   }
 
@@ -494,13 +603,24 @@ List<Indicator> analyzeLink(String rawInput) {
       'The link uses port $port instead of the normal web ports. Ordinary '
           'websites almost never need this.',
       IndicatorSeverity.warning,
+      params: {'port': port.toString()},
     ));
   }
 
-  final pathAndQuery = '${uri?.path ?? ''}${uri?.query ?? ''}';
+  // Path and query are deliberately kept apart. Gluing them together without
+  // a separator merged the last path token with the first query key, so
+  // "/login?next=.." could never match "login", and it let a ".com" query
+  // value be read as a file extension.
+  final urlPath = (uri?.path ?? '').toLowerCase();
+  final urlQuery = (uri?.query ?? '');
+  final pathAndQuery = urlQuery.isEmpty ? urlPath : '$urlPath?$urlQuery';
 
+  // Read from the path and query as separate tokens, never as a raw
+  // substring: "/purchase/confirm" must not look like a "chase" mention.
+  final pathBrandTokens =
+      pathAndQuery.toLowerCase().split(RegExp(r'[^a-z0-9]+')).toSet();
   for (final entry in brandDomains.entries) {
-    if (!pathAndQuery.toLowerCase().contains(entry.key)) continue;
+    if (!pathBrandTokens.contains(entry.key)) continue;
     if (host == entry.value || host.endsWith('.${entry.value}')) continue;
     findings.add(_hit(
       'brand_in_path',
@@ -509,21 +629,26 @@ List<Indicator> analyzeLink(String rawInput) {
           'different from ${entry.value}. This is often used to make a fake '
           'page look official.',
       IndicatorSeverity.warning,
+      params: {'brand': entry.key, 'official': entry.value},
     ));
     break;
   }
 
-  final pathTokens =
-      pathAndQuery.toLowerCase().split(RegExp(r'[^a-z0-9]+')).toSet();
+  // Checkpoint wording is read from the path only. Query text such as
+  // "?q=update+account" is a search string, not a page the link points at.
+  final pathTokens = urlPath.split(RegExp(r'[^a-z0-9]+')).toSet();
   final checkpointHits = pathTokens.where(checkpointPathWords.contains).toSet();
   if (checkpointHits.isNotEmpty) {
     findings.add(_hit(
       'checkpoint_path',
-      'Link points at an account checkpoint page',
-      'The address leads to a page about '
-          '"${(checkpointHits.toList()..sort()).join('", "')}", which is where '
-          'scammers ask people to confirm account details.',
+      'Link address contains checkpoint wording',
+      'The path of the address contains '
+          '"${(checkpointHits.toList()..sort()).join('", "')}". Scam pages '
+          'often use wording like this, so treat it as a reason to check the '
+          'sender. The page was never opened, so this is not evidence of what '
+          'it asks for.',
       IndicatorSeverity.warning,
+      params: {'words': (checkpointHits.toList()..sort()).join(', ')},
     ));
   }
 
@@ -538,12 +663,14 @@ List<Indicator> analyzeLink(String rawInput) {
           '"${(credentialKeys.toList()..sort()).join('", "')}" in its '
           'parameters. Links should never carry passwords or codes.',
       IndicatorSeverity.critical,
+      params: {'keys': (credentialKeys.toList()..sort()).join(', ')},
     ));
   }
 
-  final lastSegment = pathAndQuery.isNotEmpty
-      ? pathAndQuery.split('?').first.toLowerCase()
-      : '';
+  // File extensions are read from the final path segment only, never from
+  // query text: "/page?ref=site.com" must not be read as a ".com" download,
+  // while "/download/report.exe" still is one.
+  final lastSegment = urlPath.isEmpty ? '' : urlPath.split('/').last;
   for (final ext in dangerousExtensions) {
     if (lastSegment.endsWith('.$ext')) {
       findings.add(_hit(
@@ -553,6 +680,7 @@ List<Indicator> analyzeLink(String rawInput) {
             'program from an unexpected link is one of the fastest ways to '
             'lose control of a device.',
         IndicatorSeverity.critical,
+        params: {'ext': ext},
       ));
       break;
     }
@@ -565,6 +693,7 @@ List<Indicator> analyzeLink(String rawInput) {
         'The address points to a ".$ext" archive, which can hide its real '
             'contents. Only open archives you were expecting.',
         IndicatorSeverity.warning,
+        params: {'ext': ext},
       ));
       break;
     }
@@ -578,6 +707,7 @@ List<Indicator> analyzeLink(String rawInput) {
       'The link contains $percentCount encoded characters, which can be used '
           'to disguise the real destination.',
       IndicatorSeverity.warning,
+      params: {'count': percentCount.toString()},
     ));
   }
 
@@ -588,6 +718,7 @@ List<Indicator> analyzeLink(String rawInput) {
       'The link is ${raw.length} characters long. Long addresses are often '
           'used to hide the suspicious part somewhere in the middle.',
       IndicatorSeverity.info,
+      params: {'length': raw.length.toString()},
     ));
   }
 

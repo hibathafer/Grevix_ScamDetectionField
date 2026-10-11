@@ -9,7 +9,7 @@ answer one question about a digital message they just received:
 
 It does not pretend to know with certainty whether something is a scam. It
 shows the *warning signs it actually found*, explains each one in plain
-English, and gives a practical next step.
+language — English or Arabic — and gives a practical next step.
 
 ---
 
@@ -46,21 +46,33 @@ builds false confidence.
 ## Key features
 
 * Link analysis and message analysis in one screen.
-* More than 35 transparent checks covering, among others:
+* More than 40 transparent checks covering, among others:
   * **Links** — brand impersonation, credential wording inside a domain,
     punycode/homograph characters, text before `@`, raw IP hosts, link
     shorteners, suspicious domain endings, many sub-domains/dashes/digits,
     `http://` connections, unusual ports, credential parameters in the query
     string, executable downloads, heavily encoded addresses.
   * **Messages** — urgency and deadlines, threats, requests for passwords /
-    PINs / one-time codes, unusual payment demands (gift cards, crypto,
-    wire transfer), "release fee" requests, fake prizes, authority
-    impersonation, secrecy requests, too-good-to-be-true offers, click-and-reply
-    pressure, generic greetings, chain-forwarding, off-platform contact.
-* **Combination rule** — a link *plus* a request for money or information in
-  the same message is treated as a strong signal.
+    PINs / one-time codes, unusual payment demands (gift cards, crypto or
+    tickers such as `0.5 BTC`, wire transfer), "release fee" requests, fake
+    prizes, an unsolicited command to claim a stated cash amount, authority
+    impersonation, secrecy requests, too-good-to-be-true offers,
+    click-and-reply pressure, generic greetings, chain-forwarding,
+    off-platform contact.
+* A **request is distinguished from a warning.** "Never share your PIN" and
+  "Do not send your password to anyone" are security advice and are not
+  reported as a request, while "Do not hesitate to provide" and "unless you
+  send your PIN" still are.
+* **Combination rule** — a link *plus* a genuine request for money or private
+  details in the same message is treated as a strong signal. Mentioning a fee
+  and including a link is not enough on its own.
 * Every signal is shown with its **title, explanation, severity and source**
   (link or message).
+* **Advice that fits the input.** The recommendation is assembled from the
+  signals that actually fired: a message with no link is never told to leave a
+  link alone, an executable link is told not to download or run the file, and
+  a URL path such as `verify` is reported as a wording clue rather than as
+  proof of what the destination page asks for.
 * **Copy report** — the result can be copied as plain text and shared.
 * Optional **AI explanation** (see below) that never changes the risk level.
 * Works **fully offline** for the core analysis: no network is required to get
@@ -120,14 +132,34 @@ flutter run \
 ```
 
 `AI_BASE_URL` accepts any OpenAI-compatible endpoint, so local or alternative
-providers can be used. Without these values the app runs on rules only, which
-is the default and the mode used in the submitted APK.
+providers can be used — including Gemini through Google's OpenAI-compatible
+surface:
+
+```bash
+flutter run \
+  --dart-define=AI_API_KEY=<your-key> \
+  --dart-define=AI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/ \
+  --dart-define=AI_MODEL=gemini-2.0-flash
+```
+
+Without these values the app runs on rules only, which is the default, the
+mode used in the submitted APK, and the only mode that has been verified end to
+end here. **The Gemini path is wired and covered by a test that checks the
+request shape against a mock client, but no live Gemini call has been made** —
+no key is stored in this repository, in the source, or in any build artifact,
+and verifying a live call would mean embedding a key in a distributed APK,
+which is extractable. Treat the rule-based analysis as the product and AI as
+an optional wording layer.
 
 ## Architecture
 
 ```
 lib/
-├── main.dart / app.dart            app entry, theme wiring
+├── main.dart / app.dart            app entry, theme wiring, locale state
+├── l10n/
+│   ├── app_strings.dart            AppStrings contract + EnglishStrings
+│   ├── app_strings_ar.dart         ArabicStrings (UI text + 41 indicators)
+│   └── strings_scope.dart          InheritedWidget carrying AppStrings
 ├── theme/app_theme.dart            colours, risk styling
 ├── models/analysis_result.dart     Indicator, AnalysisResult, enums (pure Dart)
 ├── analysis/
@@ -135,7 +167,7 @@ lib/
 │   ├── url_rules.dart              deterministic URL checks
 │   ├── message_rules.dart          deterministic message checks
 │   ├── risk_scorer.dart            signals → LOW/MEDIUM/HIGH
-│   └── analysis_engine.dart        orchestration + recommendation
+│   └── analysis_engine.dart        orchestration, recommendation, l10n mapping
 ├── services/ai_explainer.dart      optional AI explanation (dart-define)
 ├── screens/
 │   ├── home_screen.dart            paste → analyse
@@ -152,7 +184,11 @@ a device.
 * Material 3
 * [`http`](https://pub.dev/packages/http) — the only third-party dependency,
   used solely for the optional AI call
-* Flutter built-in test framework — 50 tests
+* `flutter_localizations` (SDK, first-party) — Arabic Material widgets and
+  built-in strings. It pulls in [`intl`](https://pub.dev/packages/intl)
+  transitively, which is the only package added to `pubspec.lock`; no
+  third-party package was added for localisation
+* Flutter built-in test framework — 153 tests
 
 ## Setup
 
@@ -171,7 +207,7 @@ Test:
 
 ```bash
 flutter analyze             # static checks
-flutter test                # 50 tests (rules, engine, AI fallback, UI)
+flutter test                # 153 tests (rules, engine, AI fallback, UI, l10n)
 ```
 
 Build the release APK:
@@ -181,6 +217,55 @@ flutter build apk --release
 # output: build/app/outputs/flutter-apk/app-release.apk
 ```
 
+## Arabic (العربية) support
+
+The interface is available in **English and Arabic**, switchable at runtime
+from the language button in the app bar.
+
+* **English is the default.** The choice is **not persisted** — it lasts for
+  the session and the next launch starts in English again. Persisting it
+  would have meant adding `shared_preferences`, which was not worth one
+  feature.
+* **The switch is immediate** — no restart and no re-open. Tapping
+  *العربية* rebuilds the app under `Directionality.rtl` with the Arabic
+  strings.
+* **Arabic is display-only. It does not add Arabic detection.** The rule
+  catalogue still matches English text, so an Arabic-only scam message will
+  *not* be flagged. The app says so explicitly in the UI
+  (`ArabicStrings.detectionCoverageNote`), shown on both the home screen and
+  the result screen, so a shared or screenshotted result is never read out of
+  context.
+* **Detection output is identical in both languages.** Rules emit their
+  English result with a stable `id` and `severity`; only wording is
+  localised at display time. Switching language can never change a risk
+  level, and tests assert this.
+* Facts inside prose keep their original form: hostnames, brand names,
+  `paypal.com`, `xyz` and the URL the user typed are reproduced verbatim in
+  the Arabic copy — including the copy report, whose headings follow the
+  selected language while the user's own input stays untouched.
+* The brand name **"Scam Detection Field"** stays in Latin script in both
+  languages, as is normal for app names.
+* The optional AI prompt stays English (AI is disabled in the default build).
+
+### Verification
+
+* `flutter test` — 36 localisation tests covering: the default language,
+  Arabic strings being genuinely Arabic, Arabic count agreement
+  (`1 إشارة واحدة`, `2 إشارتان`, `5 إشارات`), `Directionality` being RTL in
+  Arabic and LTR in English, runtime switching in both directions without a
+  restart, identical `RiskLevel` / indicator `id` / `severity` across both
+  languages, the coverage note appearing only in Arabic, copy-report
+  contents, and no layout overflow on a 360×640 phone in either language.
+* `flutter build web --release` opened in a browser: switching to العربية
+  flips the layout — the two header buttons move from the right edge
+  (`x=720`, `x=760` on an 800 px viewport) to the left edge (`x=0`,
+  `x=40`), `document.documentElement.lang` becomes `ar`, Material's own
+  built-in strings become Arabic, and the console stays clean.
+* **Not verified on a device:** screenshots were unavailable because the
+  browser runs headless (`browser.screenshot` needs a visible tab), and
+  there is **no Android device or emulator** connected in this environment.
+  RTL was therefore verified on web and by widget tests only.
+
 ## Known limitations
 
 * The analysis is **pattern based**. A brand-new scam that uses none of the
@@ -189,9 +274,21 @@ flutter build apk --release
 * The app **never opens, visits or downloads** the link, so it performs no
   real-time domain-reputation or malware check. This is deliberate: the app
   must not put the user's device at risk.
-* Brand impersonation uses a **fixed list of common brands**; organisations
-  outside that list are only caught by the general wording rules.
-* The interface and rule wording are **English only**.
+* Brand impersonation uses a **fixed list of common brands** and matches on
+  whole labels in the hostname, so `pineapple.com` is not mistaken for Apple.
+  The trade-off is that creative spellings the rules do not strip are missed:
+  `appleid-verify.xyz` and `amazonsupport.top` are **not** reported as
+  Apple/Amazon impersonation. They are still reported through the generic
+  domain-word and suspicious-ending checks where those apply, but no
+  heuristic can prove a domain safe or hostile from its text alone.
+* The **warning-versus-request distinction is heuristic.** Security advice
+  such as "never share your PIN" is deliberately not treated as a request, but
+  an unusual phrasing that mixes both could be read either way. When in
+  doubt the app reports the signal rather than staying silent.
+* The **detection rules match English text only.** The interface is
+  translated into Arabic, but Arabic *content* is not analysed — an Arabic
+  scam message can pass unflagged, and the app states this limitation
+  directly in the UI rather than hiding it.
 * The AI explanation requires network access and a configured key; it is not
   part of the default build.
 * Built and tested on Windows: the APK is produced and verified; the iOS

@@ -1,3 +1,4 @@
+import '../l10n/app_strings.dart';
 import '../models/analysis_result.dart';
 import '../services/ai_explainer.dart';
 import 'input_classifier.dart';
@@ -7,22 +8,52 @@ import 'url_rules.dart';
 
 /// Orchestrates the whole analysis:
 /// deterministic rules -> risk level -> recommendation -> optional AI wording.
+///
+/// **Localization boundary:** the rules always run in English and always set
+/// the risk level. [AppStrings] only decides what the user *reads*. Neither
+/// `Indicator.id`, `Indicator.severity` nor the computed [RiskLevel] can be
+/// influenced by the display language.
 class AnalysisEngine {
-  AnalysisEngine({AiExplainer? explainer})
-      : explainer = explainer ?? AiExplainer.fromEnvironment();
+  AnalysisEngine({AiExplainer? explainer, AppStrings? strings})
+      : explainer = explainer ?? AiExplainer.fromEnvironment(),
+        strings = strings ?? const EnglishStrings();
 
   final AiExplainer explainer;
 
-  static const _infoRequestIds = {
-    'sensitive_request',
-    'payment_demand',
-    'fee_request',
-  };
+  /// Default display language. Tests that build an engine without strings
+  /// keep the original English behaviour.
+  final AppStrings strings;
+
+  /// Signals strong enough on their own to make "link + request" a critical
+  /// combination. A bare `fee_request` is deliberately excluded: mentioning a
+  /// fee and including a link is also the shape of ordinary delivery
+  /// notifications, so that pair alone must not jump to HIGH.
+  static const _escalationIds = {'sensitive_request', 'payment_demand'};
+
+  /// Signals that mean money is actually being demanded. `sensitive_request`
+  /// is deliberately **not** here: a message asking for a password must not be
+  /// answered with "do not transfer money" for a transfer it never mentioned.
+  static const _moneyRequestIds = {'payment_demand', 'fee_request'};
+
+  /// Signals that mean a rule found a file the link would download, so the
+  /// advice can name the real threat instead of a generic "page".
+  static const _downloadIds = {'dangerous_download', 'archive_download'};
+
+  static int _severityRank(IndicatorSeverity severity) => switch (severity) {
+        IndicatorSeverity.info => 0,
+        IndicatorSeverity.warning => 1,
+        IndicatorSeverity.critical => 2,
+      };
 
   Future<AnalysisResult> analyze({
     required String input,
     required InputKind kind,
+    AppStrings? strings,
   }) async {
+    /// Per-call override, so a running app can switch language without
+    /// rebuilding the engine.
+    final l10n = strings ?? this.strings;
+
     final text = input.trim();
     if (text.isEmpty) throw const EmptyInputException();
 
@@ -48,7 +79,8 @@ class AnalysisEngine {
           source: IndicatorSource.link,
         ));
       }
-      final asksForSomething = indicators.any((i) => _infoRequestIds.contains(i.id));
+      final asksForSomething =
+          indicators.any((i) => _escalationIds.contains(i.id));
       if (urls.isNotEmpty && asksForSomething) {
         indicators.add(const Indicator(
           id: 'combined_link_request',
@@ -63,13 +95,47 @@ class AnalysisEngine {
       }
     }
 
-    // A rule can fire on several links; show each signal only once.
-    final seen = <String>{};
-    final deduped =
-        indicators.where((indicator) => seen.add(indicator.id)).toList();
+    // A rule can fire on several links; show each signal only once. When the
+    // same rule fires twice with different severities - for example a private
+    // IP and then a public one in the same message - the more severe finding
+    // is kept, so deduplication can never hide a critical signal.
+    final deduped = <Indicator>[];
+    for (final indicator in indicators) {
+      final index = deduped.indexWhere((d) => d.id == indicator.id);
+      if (index == -1) {
+        deduped.add(indicator);
+      } else if (_severityRank(indicator.severity) >
+          _severityRank(deduped[index].severity)) {
+        deduped[index] = indicator;
+      }
+    }
 
+    // Scoring happens on the untouched rule output, before any translation.
     final level = RiskScorer.level(deduped);
-    final recommendation = _recommendation(level, deduped, kind);
+    final signals = RiskScorer.signalCount(deduped);
+
+    // Only the wording is replaced; id and severity are carried through.
+    final displayIndicators = deduped.map(l10n.localizeIndicator).toList();
+
+    final recommendation = l10n.recommendation(
+      level,
+      wantsSecrets: deduped.any(
+        (i) => i.id == 'sensitive_request' || i.id == 'sensitive_words',
+      ),
+      wantsMoney: deduped.any(
+        (i) =>
+            _moneyRequestIds.contains(i.id) ||
+            i.id == 'combined_link_request',
+      ),
+      // Only true when a link is actually present, so the advice never tells
+      // the user not to open a link the message does not contain.
+      hasLink: kind == InputKind.link ||
+          deduped.any(
+            (i) =>
+                i.id == 'link_in_message' || i.source == IndicatorSource.link,
+          ),
+      hasDownload: deduped.any((i) => _downloadIds.contains(i.id)),
+    );
 
     var mode = AnalysisMode.rulesOnly;
     String? aiSummary;
@@ -98,9 +164,9 @@ class AnalysisEngine {
 
     return AnalysisResult(
       riskLevel: level,
-      indicators: deduped,
+      indicators: displayIndicators,
       recommendation: recommendation,
-      headline: _headline(level, deduped),
+      headline: l10n.headline(level, signals),
       mode: mode,
       kind: kind,
       inputPreview: text,
@@ -108,76 +174,5 @@ class AnalysisEngine {
       aiSummary: aiSummary,
       aiObservations: aiObservations,
     );
-  }
-
-  String _headline(RiskLevel level, List<Indicator> indicators) {
-    final signals =
-        indicators.where((i) => i.severity != IndicatorSeverity.info).length;
-    switch (level) {
-      case RiskLevel.high:
-        return 'Strong warning signs matched. Do not act before you verify.';
-      case RiskLevel.medium:
-        return 'Some warning signs matched. Pause and check before you act.';
-      case RiskLevel.low:
-        return signals == 0
-            ? 'No obvious warning signs were found in this input.'
-            : 'Only minor signals found - nothing clearly suspicious.';
-    }
-  }
-
-  String _recommendation(
-    RiskLevel level,
-    List<Indicator> indicators,
-    InputKind kind,
-  ) {
-    final wantsSecrets =
-        indicators.any((i) => i.id == 'sensitive_request' || i.id == 'sensitive_words');
-    final wantsMoney = indicators
-        .any((i) => _infoRequestIds.contains(i.id) || i.id == 'combined_link_request');
-    final hasLink = kind == InputKind.link ||
-        indicators.any((i) => i.id == 'link_in_message' || i.source == IndicatorSource.link);
-
-    final buffer = StringBuffer();
-    switch (level) {
-      case RiskLevel.high:
-        buffer.write(
-          'Do not open the link, reply, or send anything. Verify the sender '
-          'through a separate, official channel - their real website or a '
-          'phone number you already had - before you do anything.',
-        );
-        break;
-      case RiskLevel.medium:
-        buffer.write(
-          'Pause before acting. Check who really sent this and confirm the '
-          'request through an official channel you look up yourself, not '
-          'through the link or number inside the message.',
-        );
-        break;
-      case RiskLevel.low:
-        buffer.write(
-          'No strong warning signs were found, but that does not prove it is '
-          'safe. If the message is unexpected, confirm it through an official '
-          'channel before you click, pay or reply.',
-        );
-        break;
-    }
-
-    if (wantsSecrets) {
-      buffer.write(
-        ' Never send a password, PIN or verification code - no legitimate '
-        'company asks for them in a message.',
-      );
-    }
-    if (wantsMoney) {
-      buffer.write(
-        ' Do not transfer money or pay any fee requested in this message.',
-      );
-    }
-    if (hasLink && level != RiskLevel.low) {
-      buffer.write(
-        ' Do not type your details into any page this link opens.',
-      );
-    }
-    return buffer.toString();
   }
 }

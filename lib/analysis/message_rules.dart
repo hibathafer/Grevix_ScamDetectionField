@@ -27,7 +27,8 @@ List<Indicator> analyzeMessage(String text) {
 
   final lower = message.toLowerCase();
 
-  bool any(List<RegExp> patterns) => patterns.any((p) => p.hasMatch(lower));
+  bool any(List<RegExp> patterns, [String? target]) =>
+      patterns.any((p) => p.hasMatch(target ?? lower));
 
   // --- Urgency -----------------------------------------------------------
   if (any([
@@ -84,14 +85,62 @@ List<Indicator> analyzeMessage(String text) {
   }
 
   // --- Explicit request for private information --------------------------
-  final asksForSecrets = any([
+  //
+  // Tested clause by clause, and only when the clause actually *asks* for a
+  // secret. "Never share your PIN or password" and "Do not send your OTP to
+  // anyone" are security warnings about scams - reporting them as a request
+  // for private information would accuse a genuine warning of being a scam.
+  final directSecretPatterns = [
     RegExp(
         r'\b(send|share|provide|enter|reply( with)?|submit|give|type|text me|whatsapp me|confirm)\b[^.!?]{0,60}\b(password|passcode|pin|otp|one[- ]time (password|code)|verification code|login credentials?|credentials|cvv|card number|bank details|iban|account number|seed phrase|recovery code)\b'),
     RegExp(
         r'\b(password|passcode|otp|verification code|one[- ]time code|cvv|card number|bank details)\b[^.!?]{0,40}\b(is|are|will be)?\s*(required|needed|necessary)\b'),
-    RegExp(r'\b(code|otp|pin)\s*[:\-]?\s*\d{4,8}\b'),
     RegExp(r'\bverify (your )?(identity|account) by (sharing|sending|providing)\b'),
-  ]);
+  ];
+
+  // "code: 482913" on its own is ambiguous: a scammer may be handing you a
+  // fake code, but banks and apps also deliver codes in exactly this shape.
+  // It only counts as a request when the message also asks for something.
+  final bareCodePattern = RegExp(r'\b(code|otp|pin)\s*[:\-]?\s*\d{4,8}\b');
+
+  // A line break inside a sentence ("please reply with\nyour OTP") must not
+  // hide a genuine request, so newlines are treated as spaces before the
+  // message is split into clauses.
+  final normalized = lower.replaceAll(RegExp(r'[\r\n]+'), ' ');
+  final clauses =
+      normalized.split(RegExp(r'[.!?;]+')).map((c) => c.trim()).toList();
+
+  final requestVerb = RegExp(
+      r'\b(send|share|provide|enter|reply( with)?|submit|give|type|confirm|reveal|disclose)\b');
+
+  // Wording that turns a sentence into pressure to disclose even though a
+  // negation appears inside it. "Do not hesitate to provide" and "unless you
+  // send" are instructions to hand something over, not warnings against it.
+  final pressureIdioms =
+      RegExp(r'\b(forget|hesitate|unless|until|delay|wait|otherwise)\b');
+
+  // A prohibition governing the verb directly: "never share", "do not send",
+  // "don't give", "nobody should ever give". Both straight and curly
+  // apostrophes are accepted.
+  final prohibitedVerb = RegExp(
+      r"\b(never|do not|don't|don’t|dont|no one|nobody|should not|"
+      r"shouldn't|shouldn’t|must not)[^.!?,;]{0,24}\b"
+      r"(send|share|provide|enter|submit|give|type|reveal|disclose)\b");
+
+  bool isProhibition(String clause) {
+    final match = prohibitedVerb.firstMatch(clause);
+    if (match == null) return false;
+    return !pressureIdioms.hasMatch(match.group(0)!);
+  }
+
+  final hasUnprohibitedRequest = clauses
+      .any((clause) => requestVerb.hasMatch(clause) && !isProhibition(clause));
+
+  final asksForSecrets = clauses.any((clause) {
+    if (isProhibition(clause)) return false;
+    if (any(directSecretPatterns, clause)) return true;
+    return hasUnprohibitedRequest && bareCodePattern.hasMatch(clause);
+  });
   if (asksForSecrets) {
     findings.add(_hit(
       'sensitive_request',
@@ -116,10 +165,11 @@ List<Indicator> analyzeMessage(String text) {
   ])) {
     findings.add(_hit(
       'sensitive_words',
-      'Mentions private account information',
-      'The message talks about passwords, codes or card details. If it also '
-          'links somewhere or asks you to confirm something, treat it as '
-          'suspicious.',
+      'Mentions a password, PIN or verification code',
+      'The message mentions a password, PIN or verification code. On its own '
+          'that is not a request - the message may simply be warning you '
+          'about them. Treat it as suspicious only if it also links '
+          'somewhere, or asks you to confirm or share something.',
       IndicatorSeverity.warning,
     ));
   }
@@ -132,6 +182,14 @@ List<Indicator> analyzeMessage(String text) {
     RegExp(r'\bbitcoin\b'),
     RegExp(r'\bcrypto(currency)?\b'),
     RegExp(r'\busdt\b'),
+    // Tickers on their own are three or four letters and would match ordinary
+    // text by accident, and a bare amount beside one is not a demand either
+    // ("I hold 3 ETH"). They only count next to a transfer verb, which is how
+    // these demands are actually written: "Send 0.5 BTC", "pay 250 USDT".
+    RegExp(
+        r'\b(send|pay|transfer|deposit|buy|purchase|top[- ]?up|withdraw)\b'
+        r'[^.!?]{0,40}\b\d[\d,.]*\s*'
+        r'(btc|eth|ltc|xrp|xmr|trx|usdt|usdc|bnb|doge|ada|sol)\b'),
     RegExp(r'\bwestern union\b'),
     RegExp(r'\bmoneygram\b'),
     RegExp(r'\bwire transfer\b'),
@@ -156,7 +214,7 @@ List<Indicator> analyzeMessage(String text) {
     RegExp(r'\brelease fee\b'),
     RegExp(r'\bactivation fee\b'),
     RegExp(r'\bprocessing fee\b'),
-    RegExp(r'\bpay (the|a) fee\b'),
+    RegExp(r'\bpay (a|the) (small |nominal |one[- ]time )?fee\b'),
     RegExp(r'\bfee (must|has) be (paid|settled)\b'),
     RegExp(r'\bunlock fee\b'),
     RegExp(r'\badmin(istrative)? fee\b'),
@@ -174,7 +232,12 @@ List<Indicator> analyzeMessage(String text) {
   // --- Prize / reward bait ------------------------------------------------
   if (any([
     RegExp(r'\byou (have )?won\b'),
-    RegExp(r'\bcongratulations\b'),
+    // "Congratulations" on its own is ordinary politeness ("Congratulations on
+    // the new job"). It only signals a fake prize when a prize, win or
+    // selection is mentioned with it.
+    RegExp(
+        r'\bcongratulations\b[^.!?]{0,80}\b(prize|reward|winner|won|lottery|'
+        r'jackpot|gift|voucher|coupon|selected|draw)\b'),
     RegExp(r'\blottery\b'),
     RegExp(r'\bjackpot\b'),
     RegExp(r'\bclaim your (prize|reward|gift|voucher|coupon)\b'),
@@ -189,6 +252,30 @@ List<Indicator> analyzeMessage(String text) {
       'The message promises money or a prize out of nowhere. Fake winnings '
           'are used to make people pay "fees" or hand over account details.',
       IndicatorSeverity.critical,
+    ));
+  }
+
+  // --- Told to claim a specific cash amount ------------------------------
+  //
+  // Narrow on purpose: an imperative "claim" together with a concrete money
+  // amount. "Claim your reward" and "You earned a reward" are ordinary
+  // wording, and so are discounts and loyalty points - what makes this shape
+  // suspicious is being told to claim a particular sum that did not come from
+  // anything you did.
+  if (any([
+    RegExp(
+        r'\bclaim (your|this|a)\b[^.!?]{0,40}\b\d[\d,.]*\s*'
+        r'(usd|eur|gbp|aed|sar|iqd|inr|yen|yuan|dollars?|euros?|pounds?|'
+        r'riyals?|dinars?|rupees?)\b'),
+  ])) {
+    findings.add(_hit(
+      'money_claim',
+      'Tells you to claim a specific amount of money',
+      'The message tells you to claim a specific cash amount. Unsolicited '
+          'claims like this are a common lure, so check who sent it before '
+          'you act on it. If it goes on to ask for a payment or a personal '
+          'detail, treat that as a red flag.',
+      IndicatorSeverity.warning,
     ));
   }
 

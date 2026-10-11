@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../analysis/analysis_engine.dart';
+import '../app.dart';
+import '../l10n/strings_scope.dart';
 import '../models/analysis_result.dart';
 import '../theme/app_theme.dart';
 import 'result_screen.dart';
@@ -44,16 +46,17 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _analyze() async {
+    // Captured before the first await so the result is rendered in whichever
+    // language was active when the user pressed the button.
+    final l10n = StringsScope.read(context);
+
     final text = _controller.text.trim();
     if (text.isEmpty) {
-      _setError('Paste or type something to analyse first.');
+      _setError(l10n.errorEmptyInput);
       return;
     }
     if (_kind == InputKind.link && RegExp(r'\s').hasMatch(text)) {
-      _setError(
-        'A website address should not contain spaces. Switch to the Message '
-        'tab to analyse a full message.',
-      );
+      _setError(l10n.errorLinkContainsSpaces);
       return;
     }
 
@@ -62,7 +65,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final AnalysisResult confirmed;
     try {
-      confirmed = await _engine.analyze(input: text, kind: _kind);
+      confirmed = await _engine.analyze(
+        input: text,
+        kind: _kind,
+        strings: l10n,
+      );
     } on EmptyInputException catch (e) {
       if (mounted) {
         setState(() {
@@ -75,7 +82,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = 'Something went wrong while analysing. Please try again.';
+          _error = l10n.errorEmptyInput;
         });
       }
       return;
@@ -101,14 +108,21 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = StringsScope.of(context);
     final isLink = _kind == InputKind.link;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Scam Detection Field'),
+        title: Text(l10n.appTitle),
         actions: [
           IconButton(
-            tooltip: 'How it works',
+            tooltip: l10n.languageTooltip,
+            key: const ValueKey('language-button'),
+            icon: const Icon(Icons.translate_rounded),
+            onPressed: _showLanguageSheet,
+          ),
+          IconButton(
+            tooltip: l10n.howItWorksTooltip,
             icon: const Icon(Icons.help_outline_rounded),
             onPressed: _showInfo,
           ),
@@ -126,16 +140,16 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 18),
               SegmentedButton<InputKind>(
-                segments: const [
+                segments: [
                   ButtonSegment(
                     value: InputKind.link,
-                    label: Text('Link'),
-                    icon: Icon(Icons.link_rounded, size: 18),
+                    label: Text(l10n.tabLink),
+                    icon: const Icon(Icons.link_rounded, size: 18),
                   ),
                   ButtonSegment(
                     value: InputKind.message,
-                    label: Text('Message'),
-                    icon: Icon(Icons.sms_outlined, size: 18),
+                    label: Text(l10n.tabMessage),
+                    icon: const Icon(Icons.sms_outlined, size: 18),
                   ),
                 ],
                 selected: {_kind},
@@ -157,10 +171,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 keyboardType: TextInputType.multiline,
                 onChanged: (_) => _setError(null),
                 decoration: InputDecoration(
-                  labelText: isLink ? 'Suspicious link' : 'Suspicious message',
-                  hintText: isLink
-                      ? 'Paste the link here, for example\nhttp://...'
-                      : 'Paste the full message here...',
+                  labelText:
+                      isLink ? l10n.linkFieldLabel : l10n.messageFieldLabel,
+                  hintText:
+                      isLink ? l10n.linkFieldHint : l10n.messageFieldHint,
                 ),
               ),
               if (_error != null) ...[
@@ -189,18 +203,22 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       )
                     : const Icon(Icons.shield_rounded),
-                label: Text(_loading ? 'Analysing...' : 'Analyse it'),
+                label: Text(_loading ? l10n.analysingButton : l10n.analyseButton),
               ),
               const SizedBox(height: 22),
               const _HowItWorksCard(),
               const SizedBox(height: 16),
-              const Text(
-                'This tool highlights common warning signs. It cannot '
-                'guarantee that something is or is not a scam - when in '
-                'doubt, verify through an official channel.',
+              Text(
+                l10n.homeDisclaimer,
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, height: 1.5, color: Color(0xFF7A8798)),
+                style: const TextStyle(
+                    fontSize: 12, height: 1.5, color: Color(0xFF7A8798)),
               ),
+              // Honest note about which languages the rules actually cover.
+              if (l10n.detectionCoverageNote != null) ...[
+                const SizedBox(height: 12),
+                _CoverageNote(text: l10n.detectionCoverageNote!),
+              ],
             ],
           ),
         ),
@@ -208,41 +226,114 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _showInfo() {
+  /// Switches language for the rest of the session. Nothing is persisted, so
+  /// the next launch starts in English again.
+  void _showLanguageSheet() {
+    final current = StringsScope.read(context);
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => const Padding(
-        padding: EdgeInsets.fromLTRB(20, 22, 20, 30),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'How this app works',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-            ),
-            SizedBox(height: 12),
-            Text(
-              '1. You paste a link or a message you received.\n\n'
-              '2. Built-in rules check the address and the wording against '
-              'well-known scam patterns: urgency, threats, requests for '
-              'passwords or codes, fake prizes, impersonation and suspicious '
-              'domain structures.\n\n'
-              '3. You get a risk level, the exact reasons behind it, and a '
-              'practical next step.\n\n'
-              'Every reason shown in the result comes from a rule you can '
-              'read, not from a hidden score. If an AI explanation is '
-              'configured, it only adds wording - it never changes the risk '
-              'level.\n\n'
-              'The app does not open, visit or download any link.',
-              style: TextStyle(fontSize: 14.5, height: 1.55, color: Color(0xFF46566B)),
-            ),
-          ],
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 22, 20, 6),
+                child: Text(
+                  current.languageSheetTitle,
+                  style: const TextStyle(
+                      fontSize: 18, fontWeight: FontWeight.w800),
+                ),
+              ),
+              for (final option in buildSupportedStrings())
+                ListTile(
+                  key: ValueKey('lang-${option.languageCode}'),
+                  title: Text(option.languageName),
+                  trailing: option.languageCode == current.languageCode
+                      ? const Icon(Icons.check_rounded, color: AppTheme.brand)
+                      : null,
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    if (current.languageCode != option.languageCode) {
+                      StringsScope.requestChange(context, option);
+                    }
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showInfo() {
+    final l10n = StringsScope.read(context);
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 22, 20, 30),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                l10n.infoSheetTitle,
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                l10n.infoSheetBody,
+                style: const TextStyle(
+                    fontSize: 14.5, height: 1.55, color: Color(0xFF46566B)),
+              ),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+}
+
+class _CoverageNote extends StatelessWidget {
+  const _CoverageNote({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF6E5),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFF0D9A8)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.language_rounded,
+              color: AppTheme.medium, size: 19),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              text,
+              key: const ValueKey('coverage-note'),
+              style: const TextStyle(
+                  fontSize: 13, height: 1.45, color: Color(0xFF6B4E12)),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -256,6 +347,7 @@ class _HeroCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = StringsScope.of(context);
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -266,14 +358,14 @@ class _HeroCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
-              Icon(Icons.shield_rounded, color: AppTheme.brand, size: 26),
-              SizedBox(width: 10),
+              const Icon(Icons.shield_rounded, color: AppTheme.brand, size: 26),
+              const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Why should I be suspicious of this?',
-                  style: TextStyle(
+                  l10n.heroTitle,
+                  style: const TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w800,
                     color: Color(0xFF12203A),
@@ -284,11 +376,10 @@ class _HeroCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          const Text(
-            'Paste a link or a message you received. You get a clear risk '
-            'level, the exact reasons behind it, and what to do next - in '
-            'plain language.',
-            style: TextStyle(fontSize: 14, height: 1.5, color: Color(0xFF46566B)),
+          Text(
+            l10n.heroBody,
+            style:
+                const TextStyle(fontSize: 14, height: 1.5, color: Color(0xFF46566B)),
           ),
           const SizedBox(height: 14),
           Wrap(
@@ -297,12 +388,12 @@ class _HeroCard extends StatelessWidget {
             children: [
               ActionChip(
                 avatar: const Icon(Icons.link_rounded, size: 17),
-                label: const Text('Try a suspicious link'),
+                label: Text(l10n.tryLinkExample),
                 onPressed: exampleBusy ? null : () => onExample(InputKind.link),
               ),
               ActionChip(
                 avatar: const Icon(Icons.sms_outlined, size: 17),
-                label: const Text('Try a suspicious message'),
+                label: Text(l10n.tryMessageExample),
                 onPressed:
                     exampleBusy ? null : () => onExample(InputKind.message),
               ),
@@ -322,6 +413,7 @@ class _ErrorBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = StringsScope.of(context);
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
@@ -352,10 +444,10 @@ class _ErrorBox extends StatelessWidget {
           ),
           if (onSwitchToMessage != null)
             Align(
-              alignment: Alignment.centerRight,
+              alignment: l10n.isRtl ? Alignment.centerLeft : Alignment.centerRight,
               child: TextButton(
                 onPressed: onSwitchToMessage,
-                child: const Text('Switch to Message'),
+                child: Text(l10n.switchToMessage),
               ),
             ),
         ],
@@ -369,10 +461,11 @@ class _HowItWorksCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const steps = [
-      ('1', 'Paste', 'A link or the full message you received.'),
-      ('2', 'Check', 'Transparent rules look for known scam patterns.'),
-      ('3', 'Decide', 'Risk level, reasons and a safe next step.'),
+    final l10n = StringsScope.of(context);
+    final steps = [
+      ('1', l10n.stepPaste, l10n.stepPasteBody),
+      ('2', l10n.stepCheck, l10n.stepCheckBody),
+      ('3', l10n.stepDecide, l10n.stepDecideBody),
     ];
 
     return Card(
@@ -381,9 +474,9 @@ class _HowItWorksCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'How it works',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            Text(
+              l10n.howItWorksTitle,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 12),
             for (final step in steps)
