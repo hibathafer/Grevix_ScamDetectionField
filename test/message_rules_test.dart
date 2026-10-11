@@ -104,4 +104,147 @@ void main() {
       }
     });
   });
+
+  group('negation - advice against disclosure is not a request', () {
+    List<String> idsOf(List<Indicator> findings) =>
+        findings.map((f) => f.id).toList();
+
+    // 1. A security-awareness message must not be read as a request.
+    test('a warning never to share an OTP is not a request', () {
+      final findings = analyzeMessage('Never share your OTP with anyone.');
+      expect(idsOf(findings), isNot(contains('sensitive_request')));
+      expect(RiskScorer.level(findings), RiskLevel.low);
+      // It is still honest that the message mentions a code.
+      expect(idsOf(findings), contains('sensitive_words'));
+    });
+
+    // 2. An explicitly negated action is advice, not pressure to act.
+    test('a negated password instruction raises no action pressure', () {
+      final findings =
+          analyzeMessage('Do not send your password to this number.');
+      expect(idsOf(findings), isNot(contains('call_to_action')));
+      expect(idsOf(findings), isNot(contains('sensitive_request')));
+      expect(RiskScorer.level(findings), RiskLevel.low);
+    });
+
+    test('other directly negated actions are not pressure either', () {
+      const warnings = [
+        'Do not click the link in this message.',
+        'Do not reply with your details.',
+        'Please do not update your account details.',
+        'Do not download the attached file.',
+      ];
+      for (final message in warnings) {
+        expect(idsOf(analyzeMessage(message)),
+            isNot(contains('call_to_action')),
+            reason: 'negated advice reported as pressure: $message');
+      }
+    });
+
+    // 3. A consequence attached to the negation makes it coercion - but only
+    //    when the penalty is the price of refusing.
+    test('a conditional threat still demands the secret and stays HIGH', () {
+      final findings = analyzeMessage(
+          'If you do not send your PIN, your account will be closed.');
+      expect(idsOf(findings), contains('threat'));
+      expect(
+        idsOf(findings),
+        contains('sensitive_request'),
+        reason: 'a conditional penalty turns the negation into a demand',
+      );
+      expect(RiskScorer.level(findings), RiskLevel.high);
+    });
+
+    test('a penalty alone does not turn a warning into a request', () {
+      // The penalty here is not the price of refusing to hand anything over,
+      // so this stays advice against disclosure.
+      const warnings = [
+        'Never share your PIN, or your account will be closed.',
+        'Never share your password, or you will be charged.',
+      ];
+      for (final message in warnings) {
+        final findings = analyzeMessage(message);
+        expect(
+          idsOf(findings),
+          isNot(contains('sensitive_request')),
+          reason: 'a mentioned penalty alone was treated as coercion: $message',
+        );
+        expect(RiskScorer.level(findings), isNot(RiskLevel.high),
+            reason: message);
+      }
+
+      // The account-closing penalty is still reported, for what it is.
+      expect(
+        idsOf(analyzeMessage(
+            'Never share your PIN, or your account will be closed.')),
+        contains('threat'),
+      );
+    });
+
+    test('other conditional phrasings are still demands', () {
+      const coerced = [
+        "If you don't send your PIN today, your account will be blocked.",
+        'Unless you send your OTP, your account will be closed.',
+      ];
+      for (final message in coerced) {
+        final findings = analyzeMessage(message);
+        expect(idsOf(findings), contains('sensitive_request'),
+            reason: message);
+        expect(RiskScorer.level(findings), RiskLevel.high, reason: message);
+      }
+    });
+
+    test('a plain prohibition still stays LOW', () {
+      const plain = [
+        'Never share your PIN or password with anyone.',
+        'Do not send your password to anyone claiming to be from the bank.',
+      ];
+      for (final message in plain) {
+        final findings = analyzeMessage(message);
+        expect(idsOf(findings), isNot(contains('sensitive_request')),
+            reason: message);
+        expect(RiskScorer.level(findings), isNot(RiskLevel.high),
+            reason: message);
+      }
+    });
+
+    // 4. A request in one sentence and a code in the next is still caught.
+    test('a request is connected to a code given in another sentence', () {
+      final findings =
+          analyzeMessage('Please send this to verify. Your code: 482913');
+      expect(idsOf(findings), contains('sensitive_request'));
+      expect(RiskScorer.level(findings), RiskLevel.high);
+    });
+
+    test('a code handed over without any request is still not a request',
+        () {
+      final findings = analyzeMessage('Your OTP: 482913. Do not share it '
+          'with anyone.');
+      expect(idsOf(findings), isNot(contains('sensitive_request')));
+      expect(RiskScorer.level(findings), RiskLevel.low);
+    });
+
+    test('genuine requests are unaffected by the negation handling', () {
+      const requests = [
+        'Please send your password.',
+        'Send us your OTP now.',
+        'Do not hesitate to provide your bank details.',
+        "Don't forget to share your verification code to continue.",
+        'Your account cannot be unlocked unless you send your PIN.',
+        'We cannot proceed until you send your OTP.',
+        'Do not delay and send your password now.',
+      ];
+      for (final message in requests) {
+        expect(idsOf(analyzeMessage(message)), contains('sensitive_request'),
+            reason: 'genuine request lost: $message');
+        expect(RiskScorer.level(analyzeMessage(message)), RiskLevel.high,
+            reason: message);
+      }
+    });
+
+    test('an un-negated push to act is still reported', () {
+      final findings = analyzeMessage('Click here to claim your prize.');
+      expect(idsOf(findings), contains('call_to_action'));
+    });
+  });
 }

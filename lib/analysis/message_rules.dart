@@ -127,10 +127,30 @@ List<Indicator> analyzeMessage(String text) {
       r"shouldn't|shouldn’t|must not)[^.!?,;]{0,24}\b"
       r"(send|share|provide|enter|submit|give|type|reveal|disclose)\b");
 
+  // A stated penalty. On its own it says nothing about whether the message is
+  // demanding something: "Never share your PIN, or your account will be
+  // closed" is still advice, because the penalty is not the price of refusing
+  // to hand anything over.
+  final consequence = RegExp(
+      r'\b(will|shall|is|are|would|can|must)\s+(be\s+)?'
+      r'(closed|suspended|blocked|locked|disabled|deleted|frozen|'
+      r'terminated|charged|reported)\b');
+
+  // A conditional wrapped around the negated verb: "if you do not send",
+  // "when you do not share". Here the penalty *is* the price of refusing, so
+  // the sentence demands the secret instead of warning against it.
+  final conditional =
+      RegExp(r'\b(if|unless|when|whenever|in case)\b[^.!?]{0,40}$');
+
   bool isProhibition(String clause) {
     final match = prohibitedVerb.firstMatch(clause);
     if (match == null) return false;
-    return !pressureIdioms.hasMatch(match.group(0)!);
+    if (pressureIdioms.hasMatch(match.group(0)!)) return false;
+    // A penalty only overrides the prohibition when the negated verb sits
+    // inside a conditional. A penalty merely mentioned in the same sentence
+    // does not turn advice into a demand.
+    if (!consequence.hasMatch(clause)) return true;
+    return !conditional.hasMatch(clause.substring(0, match.start));
   }
 
   final hasUnprohibitedRequest = clauses
@@ -345,7 +365,7 @@ List<Indicator> analyzeMessage(String text) {
   }
 
   // --- Pushes you to click / download / reply ----------------------------
-  if (any([
+  final actionPatterns = [
     RegExp(r'\bclick (the )?(link|here|below|button|now)\b'),
     RegExp(r'\bopen (the )?(link|attachment|file)\b'),
     RegExp(r'\bscan the qr\b'),
@@ -355,7 +375,31 @@ List<Indicator> analyzeMessage(String text) {
     RegExp(r'\bupdate your (details|information|account|profile)\b'),
     RegExp(r'\bconfirm your (details|information|account|identity)\b'),
     RegExp(r'\bverify (now|immediately|your account)\b'),
-  ])) {
+  ];
+
+  // A directly negated action is advice, not pressure. "Do not click the
+  // link" and "do not send your password" steer the reader *away* from the
+  // act, so reporting them as pushing the reader to act would be backwards.
+  //
+  // The negation must sit in the same sentence and close before the verb, so
+  // a warning in one sentence does not cancel a real push in another.
+  final negatedAction = RegExp(
+      r"(never|do not|don't|don’t|dont|no need to|should not|"
+      r"shouldn't|shouldn’t|must not|avoid|refrain from)"
+      r"[^.!?,;]{0,20}$");
+
+  var pushesToAct = false;
+  for (final pattern in actionPatterns) {
+    for (final match in pattern.allMatches(lower)) {
+      if (!negatedAction.hasMatch(lower.substring(0, match.start))) {
+        pushesToAct = true;
+        break;
+      }
+    }
+    if (pushesToAct) break;
+  }
+
+  if (pushesToAct) {
     findings.add(_hit(
       'call_to_action',
       'Pushes you to click, open or reply',

@@ -188,7 +188,7 @@ a device.
   built-in strings. It pulls in [`intl`](https://pub.dev/packages/intl)
   transitively, which is the only package added to `pubspec.lock`; no
   third-party package was added for localisation
-* Flutter built-in test framework — 153 tests
+* Flutter built-in test framework - 162 tests
 
 ## Setup
 
@@ -207,7 +207,7 @@ Test:
 
 ```bash
 flutter analyze             # static checks
-flutter test                # 153 tests (rules, engine, AI fallback, UI, l10n)
+flutter test                # 162 tests (rules, engine, AI fallback, UI, l10n)
 ```
 
 Build the release APK:
