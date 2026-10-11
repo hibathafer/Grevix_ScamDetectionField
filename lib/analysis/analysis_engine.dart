@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import '../l10n/app_strings.dart';
 import '../models/analysis_result.dart';
 import '../services/ai_explainer.dart';
@@ -137,9 +139,16 @@ class AnalysisEngine {
       hasDownload: deduped.any((i) => _downloadIds.contains(i.id)),
     );
 
+    // ---- Optional AI wording step -------------------------------------
+    // Everything the user is actually scored by - `deduped`, `level`,
+    // `signals` and `recommendation` - was computed above, before this
+    // block. The AI step can therefore only *add wording*: if it fails,
+    // times out, is rate limited or is not configured, the assessment above
+    // is already complete and is returned unchanged.
     var mode = AnalysisMode.rulesOnly;
     String? aiSummary;
     var aiObservations = const <String>[];
+    AiFailure? aiFailure;
 
     if (explainer.config.enabled) {
       try {
@@ -154,11 +163,34 @@ class AnalysisEngine {
           aiSummary = explanation.summary;
           aiObservations = explanation.observations;
         } else {
+          // `explain` returns null only when no key is configured, which the
+          // guard above already excluded.
           mode = AnalysisMode.rulesWithAiFallback;
+          aiFailure = AiFailure.unknown;
         }
-      } catch (_) {
-        // Network problem, timeout, bad response, rate limit...
+      } on AiException catch (e) {
+        // Expected and classified (timeout / network / 429 / HTTP error /
+        // unreadable body). The rules already produced the full result, so
+        // this only records *why* the wording step is missing. `detail` is
+        // built by AiExplainer from a status code or a fixed literal, never
+        // from the key or a response body.
         mode = AnalysisMode.rulesWithAiFallback;
+        aiFailure = e.failure;
+        debugPrint(
+          'AI step skipped (${e.failure.name}'
+          '${e.detail == null ? '' : ': ${e.detail}'}); '
+          'returning the rule-based assessment.',
+        );
+      } catch (e) {
+        // Something unclassified escaped. Still fall back - never surface a
+        // half-built result - and record the type only, so no payload, URL
+        // or key can reach the log.
+        mode = AnalysisMode.rulesWithAiFallback;
+        aiFailure = AiFailure.unknown;
+        debugPrint(
+          'AI step skipped (unhandled ${e.runtimeType}); '
+          'returning the rule-based assessment.',
+        );
       }
     }
 
@@ -173,6 +205,7 @@ class AnalysisEngine {
       analyzedAt: DateTime.now(),
       aiSummary: aiSummary,
       aiObservations: aiObservations,
+      aiFailure: aiFailure,
     );
   }
 }

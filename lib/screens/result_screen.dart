@@ -104,6 +104,21 @@ class ResultScreen extends StatelessWidget {
                         color: Color(0xFF46566B),
                       ),
                     ),
+                    // Only shown when the AI step actually failed, so a
+                    // fallback is never passed off as a full AI result. The
+                    // text is a fixed category - no key, URL or raw response.
+                    if (result.aiFailure != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        l10n.aiFailureNote(result.aiFailure!),
+                        key: const ValueKey('ai-failure-note'),
+                        style: const TextStyle(
+                          fontSize: 13,
+                          height: 1.5,
+                          color: Color(0xFF7A8798),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 10),
                     Text(
                       l10n.limitationNote,
@@ -203,6 +218,15 @@ class ResultScreen extends StatelessWidget {
         ..writeln()
         ..writeln(l10n.reportAiHeading)
         ..writeln(result.aiSummary);
+    }
+    // The copied report must carry the same honesty as the screen: a
+    // fallback that is not written down would disappear the moment the
+    // result is shared.
+    buffer
+      ..writeln()
+      ..writeln('${l10n.aboutThisAnalysis}: ${l10n.modeText(result.mode)}');
+    if (result.aiFailure != null) {
+      buffer.writeln(l10n.aiFailureNote(result.aiFailure!));
     }
     buffer
       ..writeln()

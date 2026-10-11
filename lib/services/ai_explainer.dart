@@ -1,8 +1,27 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
 import '../models/analysis_result.dart';
+
+/// A failure of the optional AI step, carrying a fixed [AiFailure] category
+/// plus a short detail.
+///
+/// [detail] is only ever built by this file from a status code, a transport
+/// message or one of the literals below. It must never receive the API key,
+/// and never a raw provider response body.
+class AiException implements Exception {
+  const AiException(this.failure, [this.detail]);
+
+  final AiFailure failure;
+  final String? detail;
+
+  @override
+  String toString() => detail == null
+      ? 'AiException(${failure.name})'
+      : 'AiException(${failure.name}: $detail)';
+}
 
 /// Configuration for the optional AI explanation step.
 ///
@@ -73,8 +92,11 @@ class AiExplainer {
 
   static const Duration timeout = Duration(seconds: 20);
 
-  /// Returns `null` when AI is not configured or the call fails; the caller
-  /// then falls back to the built-in explanations.
+  /// Returns `null` only when AI is not configured, so no request is made at
+  /// all. Any actual failure - timeout, network, rate limit, error status or
+  /// an unreadable body - is thrown as an [AiException] carrying a fixed
+  /// [AiFailure] category, so the caller can fall back to the rules *and*
+  /// still tell the developer why. Nothing thrown here contains the key.
   Future<AiExplanation?> explain({
     required String input,
     required InputKind kind,
@@ -122,29 +144,70 @@ class AiExplainer {
       ],
     };
 
-    final response = await _client
-        .post(
-          endpoint,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ${config.apiKey}',
-          },
-          body: jsonEncode(payload),
-        )
-        .timeout(timeout);
+    final http.Response response;
+    try {
+      response = await _client
+          .post(
+            endpoint,
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ${config.apiKey}',
+            },
+            body: jsonEncode(payload),
+          )
+          .timeout(timeout);
+    } on TimeoutException {
+      throw const AiException(AiFailure.timeout, 'no reply within the timeout');
+    } on http.ClientException catch (e) {
+      // Transport level failure. The key travels in a header, never in the
+      // URL, so a client message cannot leak it.
+      throw AiException(AiFailure.network, e.message);
+    } catch (e) {
+      // Not a recognised transport error, so do not *claim* it is a network
+      // problem - report the type only and let it be classified as unknown.
+      // The type is used instead of the message because an arbitrary message
+      // could contain anything.
+      throw AiException(AiFailure.unknown, e.runtimeType.toString());
+    }
 
-    if (response.statusCode != 200) return null;
+    if (response.statusCode != 200) {
+      // 429 is reported separately so a developer can tell a quota problem
+      // from a genuine outage. The body is deliberately not forwarded.
+      throw AiException(
+        response.statusCode == 429
+            ? AiFailure.rateLimited
+            : AiFailure.apiError,
+        'HTTP ${response.statusCode}',
+      );
+    }
 
-    final decoded = jsonDecode(utf8.decode(response.bodyBytes));
-    if (decoded is! Map) return null;
+    Object? decoded;
+    try {
+      decoded = jsonDecode(utf8.decode(response.bodyBytes));
+    } catch (_) {
+      throw const AiException(AiFailure.badResponse, 'body was not valid JSON');
+    }
+    if (decoded is! Map) {
+      throw const AiException(
+          AiFailure.badResponse, 'body was not a JSON object');
+    }
     final choices = decoded['choices'];
-    if (choices is! List || choices.isEmpty) return null;
+    if (choices is! List || choices.isEmpty) {
+      throw const AiException(AiFailure.badResponse, 'missing choices[]');
+    }
     final firstChoice = choices.first;
     final message = firstChoice is Map ? firstChoice['message'] : null;
     final content = message is Map ? message['content'] : null;
-    if (content is! String || content.trim().isEmpty) return null;
+    if (content is! String || content.trim().isEmpty) {
+      throw const AiException(AiFailure.badResponse, 'missing assistant text');
+    }
 
-    return _parse(content.trim());
+    final explanation = _parse(content.trim());
+    if (explanation == null) {
+      throw const AiException(
+          AiFailure.badResponse, 'unusable assistant text');
+    }
+    return explanation;
   }
 
   static String _normaliseBaseUrl(String url) {

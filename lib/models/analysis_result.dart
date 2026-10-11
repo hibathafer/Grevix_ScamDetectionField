@@ -39,6 +39,31 @@ enum AnalysisMode {
   rulesWithAiFallback,
 }
 
+/// Why the optional AI step did not produce an explanation.
+///
+/// This is a fixed category and nothing else: it never carries the API key,
+/// the request URL, a response body or any other value that could leak a
+/// secret or dump provider output into the UI and logs.
+enum AiFailure {
+  /// The provider did not answer inside the request timeout.
+  timeout,
+
+  /// The request could not be sent at all (offline, DNS, refused connection).
+  network,
+
+  /// The provider answered 429 - too many requests.
+  rateLimited,
+
+  /// The provider answered with another error status.
+  apiError,
+
+  /// The provider answered 200, but the body was not the JSON we can read.
+  badResponse,
+
+  /// Anything else that was caught and could not be classified.
+  unknown,
+}
+
 /// One transparent, explainable warning signal.
 class Indicator {
   const Indicator({
@@ -107,6 +132,7 @@ class AnalysisResult {
     required this.analyzedAt,
     this.aiSummary,
     this.aiObservations = const [],
+    this.aiFailure,
   });
 
   final RiskLevel riskLevel;
@@ -134,6 +160,14 @@ class AnalysisResult {
 
   /// Optional extra observations produced by an external AI model.
   final List<String> aiObservations;
+
+  /// Why the AI step produced nothing, or `null` when no failure happened.
+  ///
+  /// `null` covers both "no AI key was configured, so nothing was attempted"
+  /// ([AnalysisMode.rulesOnly]) and "the AI step succeeded"
+  /// ([AnalysisMode.rulesAndAi]). Only [AnalysisMode.rulesWithAiFallback]
+  /// carries a reason here.
+  final AiFailure? aiFailure;
 
   /// Signals that actually raised the risk (warning + critical).
   List<Indicator> get reasons {

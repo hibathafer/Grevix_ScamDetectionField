@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -263,6 +264,190 @@ void main() {
 
       expect(result.mode, isNot(AnalysisMode.rulesAndAi));
       expect(result.riskLevel, RiskLevel.high);
+    });
+
+    // ------------------------------------------------------------------------
+    // Phase 2 - resilient fallback.
+    //
+    // None of these tests opens a real network connection or uses a real
+    // key: every provider answer is a MockClient, so the suite stays
+    // deterministic and free of quota use.
+    // ------------------------------------------------------------------------
+
+    /// Runs one failing provider against the engine and returns the reason
+    /// that was recorded, asserting on the way that the fallback really
+    /// produced a usable assessment for a link the rules already score HIGH.
+    Future<AiFailure> reasonFor(http.Client client) async {
+      final engine = AnalysisEngine(explainer: _explainerWith(client));
+      final result =
+          await engine.analyze(input: _scamLink, kind: InputKind.link);
+      expect(result.mode, AnalysisMode.rulesWithAiFallback,
+          reason: 'a failing AI step must fall back, not fail the analysis');
+      expect(result.aiSummary, isNull,
+          reason: 'no AI wording may be shown when the AI step failed');
+      expect(result.riskLevel, RiskLevel.high,
+          reason: 'the rules must still assess the link on their own');
+      expect(result.reasons, isNotEmpty);
+      expect(result.recommendation, isNotEmpty);
+      return result.aiFailure!;
+    }
+
+    http.Response reply(Object body) => http.Response(
+          jsonEncode(body),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+
+    http.Response plain(String body, int status) => http.Response(
+          body,
+          status,
+          headers: {'content-type': 'text/plain'},
+        );
+
+    test('each failure shape is classified instead of being swallowed',
+        () async {
+      expect(
+        await reasonFor(
+            MockClient((r) async => throw TimeoutException('slow'))),
+        AiFailure.timeout,
+      );
+      expect(
+        await reasonFor(
+            MockClient((r) async => throw http.ClientException('offline'))),
+        AiFailure.network,
+      );
+      expect(await reasonFor(MockClient((r) async => plain('busy', 429))),
+          AiFailure.rateLimited);
+      expect(await reasonFor(MockClient((r) async => plain('boom', 500))),
+          AiFailure.apiError);
+      expect(await reasonFor(MockClient((r) async => plain('not json', 200))),
+          AiFailure.badResponse);
+      expect(
+          await reasonFor(
+              MockClient((r) async => reply({'unexpected': 'shape'}))),
+          AiFailure.badResponse);
+      expect(await reasonFor(MockClient((r) async => reply({'choices': []}))),
+          AiFailure.badResponse);
+      expect(
+        await reasonFor(MockClient((r) async => reply({
+              'choices': [
+                {'message': {'content': '   '}},
+              ],
+            }))),
+        AiFailure.badResponse,
+      );
+      // Valid JSON in the wrong shape, so the parser cannot use it.
+      expect(
+        await reasonFor(MockClient((r) async => reply({
+              'choices': [
+                {'message': {'content': '{"summary": 12}'}},
+              ],
+            }))),
+        AiFailure.badResponse,
+      );
+    });
+
+    test('an unrecognised failure is reported as unknown, not invented',
+        () async {
+      // A StateError is neither a timeout nor http's own transport error, so
+      // calling it a network problem would be a guess.
+      expect(
+        await reasonFor(MockClient((r) async => throw StateError('odd'))),
+        AiFailure.unknown,
+      );
+    });
+
+    test('a failed AI step leaves the whole rule-based result untouched',
+        () async {
+      final withFailingAi = AnalysisEngine(
+        explainer: _explainerWith(
+          MockClient((r) async => throw http.ClientException('offline')),
+        ),
+      );
+      // No key at all - the deterministic baseline for the same input.
+      final withoutAi =
+          AnalysisEngine(explainer: AiExplainer(const AiConfig.empty()));
+
+      for (final sample in const [
+        (input: _scamLink, kind: InputKind.link),
+        (input: _scamMessage, kind: InputKind.message),
+      ]) {
+        final label = '${sample.kind.name}: ${sample.input}';
+        final failed = await withFailingAi.analyze(
+            input: sample.input, kind: sample.kind);
+        final baseline = await withoutAi.analyze(
+            input: sample.input, kind: sample.kind);
+
+        expect(failed.mode, AnalysisMode.rulesWithAiFallback, reason: label);
+        expect(baseline.mode, AnalysisMode.rulesOnly, reason: label);
+        expect(failed.riskLevel, baseline.riskLevel, reason: label);
+        expect(failed.indicators.map((i) => i.id),
+            baseline.indicators.map((i) => i.id),
+            reason: label);
+        expect(failed.recommendation, baseline.recommendation, reason: label);
+        expect(failed.headline, baseline.headline, reason: label);
+        expect(failed.indicators.map((i) => i.title),
+            baseline.indicators.map((i) => i.title),
+            reason: label);
+      }
+    });
+
+    test('a missing key means nothing is attempted and no failure is claimed',
+        () async {
+      final engine =
+          AnalysisEngine(explainer: AiExplainer(const AiConfig.empty()));
+      final result =
+          await engine.analyze(input: _scamLink, kind: InputKind.link);
+
+      expect(result.mode, AnalysisMode.rulesOnly);
+      expect(result.aiFailure, isNull,
+          reason: 'nothing was requested, so nothing failed');
+      expect(result.riskLevel, RiskLevel.high);
+    });
+
+    test('a successful AI step records no failure', () async {
+      final engine = AnalysisEngine(
+        explainer: _explainerWith(MockClient((r) async => reply({
+              'choices': [
+                {
+                  'message': {
+                    'content': jsonEncode({
+                      'summary': 'A short, calm explanation for the reader.',
+                      'observations': ['one point'],
+                    }),
+                  },
+                },
+              ],
+            }))),
+      );
+      final result =
+          await engine.analyze(input: _scamLink, kind: InputKind.link);
+
+      expect(result.mode, AnalysisMode.rulesAndAi);
+      expect(result.aiFailure, isNull);
+    });
+
+    test('the configured key never reaches a failure report', () async {
+      final explainer = _explainerWith(
+          MockClient((r) async => plain('quota exceeded', 429)));
+
+      AiException? caught;
+      try {
+        await explainer.explain(
+          input: _scamMessage,
+          kind: InputKind.message,
+          riskLevel: RiskLevel.high,
+          indicators: const [],
+        );
+      } on AiException catch (e) {
+        caught = e;
+      }
+
+      expect(caught, isNotNull);
+      expect(caught!.failure, AiFailure.rateLimited);
+      expect(caught.toString(), isNot(contains('test-key')));
+      expect(caught.toString(), isNot(contains('Bearer')));
+      expect(caught.detail, 'HTTP 429');
     });
   });
 }

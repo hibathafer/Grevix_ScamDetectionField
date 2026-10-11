@@ -1,11 +1,17 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:scam_detection_field/analysis/analysis_engine.dart';
 import 'package:scam_detection_field/app.dart';
 import 'package:scam_detection_field/l10n/app_strings.dart';
 import 'package:scam_detection_field/l10n/app_strings_ar.dart';
+import 'package:scam_detection_field/l10n/strings_scope.dart';
 import 'package:scam_detection_field/models/analysis_result.dart';
 import 'package:scam_detection_field/screens/result_screen.dart';
+import 'package:scam_detection_field/services/ai_explainer.dart';
 
 const _scamLink =
     'http://paypal-secure-login.verify-account.xyz/session/update';
@@ -566,6 +572,161 @@ void main() {
 
       expect(find.text(arabic.riskLabel(RiskLevel.high)), findsOneWidget);
       expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('AI fallback status is visible, in both languages', () {
+    // The provider answers 429 on purpose, from a mock - no real key and no
+    // network access, so this stays deterministic.
+    Future<AnalysisResult> fallbackResult(AppStrings strings) =>
+        AnalysisEngine(
+          explainer: AiExplainer(
+            const AiConfig(
+              apiKey: 'test-key',
+              baseUrl: 'https://example.invalid/v1',
+              model: 'test-model',
+            ),
+            client: MockClient((r) async => http.Response(
+                  'busy',
+                  429,
+                  headers: {'content-type': 'text/plain'},
+                )),
+          ),
+        ).analyze(input: _scamLink, kind: InputKind.link, strings: strings);
+
+    Future<void> pumpResult(
+      WidgetTester tester,
+      AnalysisResult result,
+      AppStrings strings,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Directionality(
+            // Matches the real app, where the scope sits above MaterialApp and
+            // decides the writing direction for the whole tree.
+            textDirection:
+                strings.isRtl ? TextDirection.rtl : TextDirection.ltr,
+            child: StringsScope(
+              strings: strings,
+              onChanged: (_) {},
+              child: ResultScreen(result: result),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('the English reason is shown beside the fallback note',
+        (tester) async {
+      final result = await fallbackResult(english);
+      expect(result.mode, AnalysisMode.rulesWithAiFallback);
+      expect(result.aiFailure, AiFailure.rateLimited);
+
+      await pumpResult(tester, result, english);
+
+      expect(find.byKey(const ValueKey('ai-failure-note')), findsOneWidget);
+      expect(
+        find.text(english.aiFailureNote(result.aiFailure!)),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the Arabic reason is rendered in Arabic', (tester) async {
+      final result = await fallbackResult(arabic);
+
+      await pumpResult(tester, result, arabic);
+
+      final note =
+          tester.widget<Text>(find.byKey(const ValueKey('ai-failure-note')));
+      expect(note.data, arabic.aiFailureNote(AiFailure.rateLimited));
+      expect(_arabicScript.hasMatch(note.data!), isTrue);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a result with no AI failure shows no failure reason',
+        (tester) async {
+      // No key configured, so nothing was attempted and nothing failed.
+      final result = await AnalysisEngine()
+          .analyze(input: _scamLink, kind: InputKind.link, strings: english);
+      expect(result.mode, AnalysisMode.rulesOnly);
+      expect(result.aiFailure, isNull);
+
+      await pumpResult(tester, result, english);
+
+      expect(find.byKey(const ValueKey('ai-failure-note')), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a successful AI step shows no failure reason either',
+        (tester) async {
+      final okBody = jsonEncode({
+        'choices': [
+          {
+            'message': {
+              'content': jsonEncode({
+                'summary': 'A short, calm explanation for the reader.',
+                'observations': ['one point'],
+              }),
+            },
+          },
+        ],
+      });
+
+      final result = await AnalysisEngine(
+        explainer: AiExplainer(
+          const AiConfig(
+            apiKey: 'test-key',
+            baseUrl: 'https://example.invalid/v1',
+            model: 'test-model',
+          ),
+          client: MockClient((r) async => http.Response(
+                okBody,
+                200,
+                headers: {'content-type': 'application/json'},
+              )),
+        ),
+      ).analyze(input: _scamLink, kind: InputKind.link, strings: english);
+
+      expect(result.mode, AnalysisMode.rulesAndAi);
+      expect(result.aiFailure, isNull);
+
+      await pumpResult(tester, result, english);
+
+      expect(find.byKey(const ValueKey('ai-failure-note')), findsNothing);
+    });
+
+    test('the copied report keeps the fallback status too', () async {
+      final result = await fallbackResult(arabic);
+      final report = ResultScreen(result: result).buildReport(arabic);
+
+      expect(
+        report,
+        contains(arabic.modeText(AnalysisMode.rulesWithAiFallback)),
+      );
+      expect(report, contains(arabic.aiFailureNote(AiFailure.rateLimited)));
+    });
+
+    test('every failure category has its own note, in both languages', () {
+      final englishNotes = <String, AiFailure>{};
+      final arabicNotes = <String, AiFailure>{};
+      for (final failure in AiFailure.values) {
+        final en = english.aiFailureNote(failure);
+        final ar = arabic.aiFailureNote(failure);
+
+        expect(en, isNotEmpty, reason: failure.name);
+        expect(en, startsWith('Reason:'), reason: failure.name);
+        expect(ar, isNotEmpty, reason: failure.name);
+        expect(_arabicScript.hasMatch(ar), isTrue,
+            reason: 'must actually be translated: ${failure.name}');
+
+        englishNotes[en] = failure;
+        arabicNotes[ar] = failure;
+      }
+      expect(englishNotes.length, AiFailure.values.length,
+          reason: 'distinct categories must not collapse into one sentence');
+      expect(arabicNotes.length, AiFailure.values.length);
     });
   });
 }

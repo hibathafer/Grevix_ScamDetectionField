@@ -151,6 +151,34 @@ and verifying a live call would mean embedding a key in a distributed APK,
 which is extractable. Treat the rule-based analysis as the product and AI as
 an optional wording layer.
 
+### When AI is unavailable
+
+The deterministic analysis is computed **before** the AI step is attempted,
+so the risk level, the reasons and the recommendation already exist by the
+time the request goes out. If AI cannot be used, the app returns that same
+rule-based result **unchanged** — nothing is invented, nothing is dropped,
+and the analysis never fails or hangs because of it.
+
+| Situation | Mode shown on the result | What happens |
+| --- | --- | --- |
+| No `AI_API_KEY` in this build | `rulesOnly` | No request is made at all |
+| AI answered and the wording was usable | `rulesAndAi` | AI wording is added; the risk level is untouched |
+| AI failed, timed out, was rate limited, or answered badly | `rulesWithAiFallback` | The rule-based result is returned as-is |
+
+The "About this analysis" card always states which of the three applied. A
+fallback additionally adds one line naming the reason in plain language: a
+timeout, an unreachable service, too many requests, an error status, or a
+reply the app could not read. The same note is included when the report is
+copied, so a shared or screenshotted result never hides a fallback.
+
+A failure carries only that fixed category. It never carries the key, the
+request URL, or a raw provider response. In debug builds the category is also
+written to the developer console, which is enough to tell a quota problem
+from an outage.
+
+The request times out after 20 seconds, so the user is never left waiting
+indefinitely.
+
 ## Architecture
 
 ```
@@ -188,7 +216,7 @@ a device.
   built-in strings. It pulls in [`intl`](https://pub.dev/packages/intl)
   transitively, which is the only package added to `pubspec.lock`; no
   third-party package was added for localisation
-* Flutter built-in test framework - 162 tests
+* Flutter built-in test framework - 176 tests
 
 ## Setup
 
@@ -207,7 +235,7 @@ Test:
 
 ```bash
 flutter analyze             # static checks
-flutter test                # 162 tests (rules, engine, AI fallback, UI, l10n)
+flutter test                # 176 tests (rules, engine, AI fallback, UI, l10n)
 ```
 
 Build the release APK:

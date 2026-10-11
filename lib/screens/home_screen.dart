@@ -78,11 +78,16 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
       return;
-    } catch (_) {
+    } catch (e) {
+      // An AI failure never reaches here - the engine catches it and returns
+      // the rule-based result. So this is a genuine defect. Do not tell the
+      // user to "type something first" for a problem they did not cause, and
+      // do not print the exception message, which could carry anything.
+      debugPrint('Analysis failed unexpectedly (${e.runtimeType})');
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = l10n.errorEmptyInput;
+          _error = l10n.errorUnexpected;
         });
       }
       return;

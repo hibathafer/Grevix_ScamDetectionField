@@ -60,6 +60,11 @@ abstract class AppStrings {
 
   String get errorLinkContainsSpaces;
 
+  /// Shown when analysis fails for a reason that is neither an empty input
+  /// nor a malformed link - so the user is never told "type something first"
+  /// for a problem they did not cause.
+  String get errorUnexpected;
+
   String get switchToMessage;
 
   String get analyseButton;
@@ -130,6 +135,13 @@ abstract class AppStrings {
   String analysedAt(String time, int checks);
 
   String modeText(AnalysisMode mode);
+
+  /// One line naming *why* the AI wording step produced nothing.
+  ///
+  /// Rendered only when `result.aiFailure != null`, i.e. only alongside
+  /// [AnalysisMode.rulesWithAiFallback]. It must describe the fixed
+  /// [AiFailure] category and never echo a key, a URL or a response body.
+  String aiFailureNote(AiFailure failure);
 
   // -------------------------------------------------------------------------
   // Risk header
@@ -280,6 +292,11 @@ class EnglishStrings extends AppStrings {
       'tab to analyse a full message.';
 
   @override
+  String get errorUnexpected =>
+      'Something went wrong while analysing. Nothing was sent anywhere - '
+      'please try again.';
+
+  @override
   String get switchToMessage => 'Switch to Message';
 
   @override
@@ -398,6 +415,23 @@ class EnglishStrings extends AppStrings {
           'The risk level and the reasons above come from the app\'s built-in '
               'rules. An AI explanation was requested but could not be '
               'completed, so only the rules are shown.',
+      };
+
+  @override
+  String aiFailureNote(AiFailure failure) => switch (failure) {
+        AiFailure.timeout =>
+          'Reason: the AI service did not answer within the time limit.',
+        AiFailure.network =>
+          'Reason: the AI service could not be reached from this device.',
+        AiFailure.rateLimited =>
+          'Reason: the AI service is handling too many requests right now.',
+        AiFailure.apiError =>
+          'Reason: the AI service returned an error.',
+        AiFailure.badResponse =>
+          'Reason: the AI service replied with something the app could not '
+              'read.',
+        AiFailure.unknown =>
+          'Reason: the AI step stopped for an unexpected reason.',
       };
 
   @override

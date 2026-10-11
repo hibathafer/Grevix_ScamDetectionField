@@ -100,6 +100,11 @@ class ArabicStrings extends AppStrings {
       'لتحليل رسالة كاملة.';
 
   @override
+  String get errorUnexpected =>
+      'حدث خطأ غير متوقّع أثناء التحليل. لم يُرسَل أي شيء إلى أي مكان — '
+      'حاول مرة أخرى.';
+
+  @override
   String get switchToMessage => 'الانتقال إلى تبويب الرسالة';
 
   @override
@@ -223,6 +228,22 @@ class ArabicStrings extends AppStrings {
         AnalysisMode.rulesWithAiFallback =>
           'مستوى المخاطة والأسباب أعلاه مصدرها القواعد المدمجة في التطبيق. '
               'طُلب شرح بالذكاء الاصطناعي لكن لم يكتمل، لذا تظهر القواعد فقط.',
+      };
+
+  @override
+  String aiFailureNote(AiFailure failure) => switch (failure) {
+        AiFailure.timeout =>
+          'السبب: لم تُجب خدمة الذكاء الاصطناعي ضمن المهلة المحدّدة.',
+        AiFailure.network =>
+          'السبب: تعذّر الوصول إلى خدمة الذكاء الاصطناعي من هذا الجهاز.',
+        AiFailure.rateLimited =>
+          'السبب: خدمة الذكاء الاصطناعي تتعامل حالياً مع عدد كبير من الطلبات.',
+        AiFailure.apiError =>
+          'السبب: أعادت خدمة الذكاء الاصطناعي رداً يدل على خطأ.',
+        AiFailure.badResponse =>
+          'السبب: أعادت خدمة الذكاء الاصطناعي رداً لا يستطيع التطبيق قراءته.',
+        AiFailure.unknown =>
+          'السبب: توقفت خطوة الذكاء الاصطناعي لسبب غير متوقّع.',
       };
 
   @override

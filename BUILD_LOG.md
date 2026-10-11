@@ -506,12 +506,99 @@ a risk level.
 
 ## 4. Challenge Card #1
 
-*Not yet received.*
+### What the card asked for, and the organiser's clarification
 
-When received this section will record: what the card literally asked, the
-intended goal, the interpretation chosen, what changed, what stayed, what was
-added or removed, what AI suggested, what the builder decided, and what was
-rejected.
+The card describes a coding-assistant platform that relies on Gemini APIs and
+requests a Google AI Studio fallback. The organiser clarified that the existing
+project should be **adapted** to the challenge rather than have its core
+purpose replaced, and that the aim is to show adaptability and creativity.
+
+### Interpretation chosen
+
+Scam Detection Field keeps its purpose: explain *why* a link or message may be
+suspicious. The nearest honest equivalent of "keep working when the AI service
+is unavailable" in this product is:
+
+> the application must still produce a complete, useful risk assessment when
+> the AI service cannot be reached.
+
+That is what was built. **This is not a coding assistant and no claim is made
+that it is.** No coding-assistant functionality was implemented, because
+adding one would have replaced the product instead of adapting it.
+
+### What the Phase 2 submission claimed
+
+> The app continues to use rule-based analysis if AI becomes unavailable, so
+> risk levels, explanations and recommendations remain available.
+
+### Was that claim already true?
+
+**Mostly yes.** `AnalysisEngine` has always computed the indicators, the risk
+level and the recommendation *before* the AI block runs, so an AI failure
+could never remove them. That part was preserved rather than duplicated.
+
+**What was genuinely missing** was that a failure carried no information at
+all. `catch (_)` discarded the reason, `explain()` returned a bare `null` for
+a timeout and for a quota limit and for a broken body alike, and nothing in
+the result or the UI could tell the three apart. So the fallback worked but
+was invisible and undebuggable. This round made the *existing* fallback
+observable and diagnosable.
+
+### What changed
+
+| File | Change | Why |
+| --- | --- | --- |
+| `lib/models/analysis_result.dart` | New `AiFailure` enum (`timeout`, `network`, `rateLimited`, `apiError`, `badResponse`, `unknown`) and a nullable `aiFailure` field on `AnalysisResult` | A fixed, secret-free category instead of an unexplained blank |
+| `lib/services/ai_explainer.dart` | Failures now throw a typed `AiException` instead of returning `null`. Transport errors, 429, other error statuses and four unreadable-body shapes are classified separately | A quota problem is not an outage; the two must not look identical |
+| `lib/analysis/analysis_engine.dart` | `on AiException` sets the category, a broad `catch` still falls back as `unknown`, and `debugPrint` writes the category | Diagnostics for developers without surfacing anything to the user |
+| `lib/l10n/app_strings.dart`, `app_strings_ar.dart` | New `aiFailureNote(AiFailure)` and `errorUnexpected`, in both languages | The reason must be readable, and must be translated like everything else |
+| `lib/screens/result_screen.dart` | The reason is shown under the fallback note, and is added to the copied report | A shared or screenshotted result must not hide the fallback |
+| `lib/screens/home_screen.dart` | The generic catch no longer reports `errorEmptyInput` | Telling a user "type something first" for a defect they did not cause is a false message |
+
+### What stayed unchanged
+
+* Every detection rule, every threshold, and every earlier bug fix.
+* The order of operations: rules → level → recommendation → *then* AI wording.
+  The AI step still cannot change a risk level, an indicator, or the advice.
+* The OpenAI-compatible client, the 20-second timeout, and the `--dart-define`
+  configuration mechanism.
+* No new dependency was added. `http` remains the only third-party package.
+* No additional AI provider was introduced, so no second fallback provider is
+  being claimed.
+
+### What was rejected
+
+* **A second AI provider as a "fallback provider".** Rejected: it would burn
+  quota, add surface area, and manufacture a fallback claim the product does
+  not need. The real fallback here is the deterministic analyzer.
+* **Showing the raw provider response or the exception message to the user.**
+  Rejected: it is confusing to a non-technical reader and is an unnecessary
+  disclosure path.
+* **Retrying the AI call automatically.** Rejected for this phase: a retry
+  lengthens the wait for a result the user does not need, since the rule-based
+  answer is already complete when the call is made.
+* **A local proxy/backend to hold the key server-side.** Rejected for this
+  phase: it cannot be deployed and verified inside the hackathon window, and
+  an unverified deployment would be a worse claim than no deployment.
+
+### Honesty of the claim
+
+| Category | Item |
+| --- | --- |
+| **Implemented and tested** | Deterministic analysis for links and messages; AI failure → unchanged rule-based result; classification of timeout / network / 429 / HTTP error / unreadable body / unrecognised; the reason rendered on screen and in the copied report, in English and Arabic |
+| **Implemented but not live-verified** | The AI request itself. It is exercised only through `MockClient`; **no live Gemini or OpenAI call has ever been made from this project** |
+| **Simulated in tests** | Every provider answer: a 429, a 500, a timeout, an offline socket, malformed JSON, an empty `choices[]`, empty assistant text, and valid JSON in the wrong shape |
+| **Not implemented** | Coding-assistant functionality; a backend proxy; automatic retries; any second AI provider |
+
+### Security note on the key
+
+The key is still read only through `String.fromEnvironment('AI_API_KEY')` and
+is still absent from this repository, the source, and every build artifact on
+disk. The new failure reporting was designed so it cannot change that: an
+`AiException` carries a fixed enum plus at most a status code or a transport
+message, and a test asserts that the configured key never appears in it.
+Compile-time embedding is **not** secure storage for a distributed binary, so
+the submitted APK stays rules-only.
 
 ---
 
@@ -538,3 +625,25 @@ security review of the public repository, submission package.*
   overwritten.
 * No API key, keystore or temporary file is present in the working tree; the
   release APK from the initial build was never rebuilt with new credentials.
+
+**State at the end of the Phase 2 (AI resilience) round**
+
+* `flutter analyze` — **No issues found**.
+* `flutter test` — **176/176 passed** (up from 164; +12 tests: 8 in
+  `analysis_engine_test.dart` for failure classification, fallback parity and
+  key non-disclosure, and 6 in `l10n_test.dart` for the localised reason, the
+  on-screen rendering and the copied report).
+* The whole suite is deterministic. **No test opens a network connection and no
+  test uses a real key** — every provider answer is a `MockClient`, so no API
+  quota is consumed.
+* Working tree at the time of writing: the change is complete and verified but
+  **not committed**. The last commit is `534d0fc`, which matches the remote.
+* Rollback tag `mvp-baseline-v1` still points at `8f5aa52` and was not
+  overwritten.
+* No new dependency was added. No rule, threshold or earlier bug fix was
+  modified.
+* **No Android device or emulator was available**, so device testing was not
+  performed and is not claimed. Evidence is unit tests, widget tests and
+  `flutter analyze`.
+* **Live Gemini integration was not verified**, because no key exists in this
+  environment and no live call was made. See Challenge Card #1 above.
