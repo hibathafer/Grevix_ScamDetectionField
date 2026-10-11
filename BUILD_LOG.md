@@ -629,7 +629,7 @@ security review of the public repository, submission package.*
 **State at the end of the Phase 2 (AI resilience) round**
 
 * `flutter analyze` — **No issues found**.
-* `flutter test` — **176/176 passed** (up from 164; +12 tests: 8 in
+* `flutter test` — **176/176 passed** (up from 164; +12 tests: 6 in
   `analysis_engine_test.dart` for failure classification, fallback parity and
   key non-disclosure, and 6 in `l10n_test.dart` for the localised reason, the
   on-screen rendering and the copied report).
