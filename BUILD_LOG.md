@@ -1,5 +1,499 @@
 # Build Log — Scam Detection Field
 
+**Event:** Grevix AfterCode — 24-hour individual hackathon
+**Repository:** https://github.com/hibathafer/Grevix_ScamDetectionField
+
+This document records the development process, technical decisions, challenge adaptations, testing evidence, and known limitations. Historical entries describe the state at the time they were recorded. The final section identifies the latest recorded submission state.
+
+## Legend
+
+- **AI did:** Work performed or proposed by the AI teammate.
+- **Builder decided:** Decisions made by the human builder, including routine technical decisions delegated to the AI teammate under the master prompt.
+- **Rejected:** Ideas considered and dropped, with the reason.
+
+---
+
+## 0. Starting State — Hackathon Start
+
+**Workspace:** `C:\Hack_Projects\Scam Detection Field`
+
+The workspace contained a fresh Flutter project. `lib/main.dart` was the default Flutter template. No previous implementation of Scam Detection Field existed.
+
+**Environment:** Flutter 3.44.6 stable, Dart 3.12.2, Android SDK 36.0.0, Windows, Chrome, and Edge. Android SDK licenses had not been accepted at the initial environment check.
+
+A separate training prototype from before the hackathon was not opened, copied, or reused. The actual project was created during the hackathon from the current workspace.
+
+## 1. Initial Build
+
+### What was built
+
+A focused Flutter application with this user flow:
+
+**Enter a link or message → Analyse → Risk level → Reasons → Recommendation → Limitation note**
+
+| Area             | Implementation                                                                                                                           |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Input screen     | Link and Message tabs, example presets, validation, error states, and a “How it works” sheet                                           |
+| Result screen    | Risk header, indicator list, optional AI explanation, recommendation, analysis limitation, and copyable report                           |
+| URL rules        | Initial catalogue of URL warning-pattern checks                                                                                          |
+| Message rules    | Initial catalogue of message and social-engineering warning-pattern checks                                                               |
+| Combination rule | A link combined with a genuine request for money or private information can produce a stronger signal                                    |
+| Risk scoring     | Warning = 1 point; critical = 5 points; any critical indicator produces HIGH; 7+ warning points produce HIGH; 2–6 points produce MEDIUM |
+| AI integration   | Optional OpenAI-compatible explanation with error handling and rule-based fallback                                                       |
+| Tests            | Initial suite of 50 tests covering the analysis pipeline, AI response handling, and UI flow                                              |
+
+**Historical indicator-count correction:** The initial URL-rule count was recorded as 21 groups. A later inspection counted 24 URL-rule call sites. With 14 initial message groups and two engine-synthesised indicators, the catalogue at that stage contained 40 indicators. A later refinement added a message indicator, bringing the documented total to 41.
+
+### Why it was built this way
+
+- Deterministic rules determine the risk level. AI only produces additional wording.
+- The application explains which indicators were found instead of presenting an unexplained verdict.
+- No confidence percentage is shown because the scoring method has not been scientifically calibrated.
+- The application never opens a supplied URL. Fetching a potentially malicious destination would introduce a separate security and privacy risk.
+- The MVP deliberately excludes accounts, dashboards, history, and unrelated secondary features.
+
+### Important technical decisions
+
+| Decision         | Choice                                                                   | Reason                                                                                            |
+| ---------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| State management | Flutter's built-in`StatefulWidget` with an injected `AnalysisEngine` | The MVP has a small, straightforward flow; an additional state-management package was unnecessary |
+| Dependencies     | `http` for optional AI requests                                        | Other core functionality uses Flutter and Dart                                                    |
+| Models           | Pure Dart                                                                | Analysis can be unit-tested without a device                                                      |
+| API key          | Runtime/build configuration through`--dart-define`                     | Avoid hardcoding secrets in source                                                                |
+| Package identity | `scam_detection_field`, Android ID `com.grevix.scamdetectionfield`   | Avoid unfinished default template identifiers                                                     |
+| Scoring          | Simple warning and critical weights                                      | Easier to explain and test                                                                        |
+
+### AI contributions
+
+- Proposed the initial separation between models, rules, scoring, engine, services, screens, and widgets.
+- Generated implementation, tests, and documentation.
+- Helped diagnose implementation and test issues, including directive placement, regular-expression escaping, nullable values, `copyWith`, navigation arguments, and widget-test viewport problems.
+- Proposed wording for the limitation and fallback explanations.
+
+### Builder decisions
+
+- Kept the product focused on explaining suspicious indicators rather than claiming to determine with certainty whether something is a scam.
+- Delegated routine implementation choices to the AI teammate.
+- Preserved the core flow and prioritised reliability over unrelated features.
+
+### Rejected ideas
+
+| Idea                                                     | Reason                                                               |
+| -------------------------------------------------------- | -------------------------------------------------------------------- |
+| A machine-learning classifier trained on scam messages   | No suitable labelled dataset was available within the time limit     |
+| An arbitrary confidence percentage                       | Would imply unsupported scientific calibration                       |
+| Live URL fetching or a VirusTotal-style lookup           | Would introduce network, privacy, security, and API-key requirements |
+| Message history, favourites, profiles, or authentication | Not necessary for the core user flow                                 |
+| A separate clipboard-paste feature                       | Native text-field paste was sufficient for the MVP                   |
+| Grammar or spelling quality scoring                      | Subjective and potentially unfair to non-native English speakers     |
+
+### Initial verification
+
+The initial build log recorded:
+
+- `flutter analyze` — no issues found.
+- `flutter test` — 50 tests passed.
+- `flutter build apk --release` — succeeded, producing an APK of approximately 47 MB.
+- `flutter build web --release` — succeeded.
+- A local browser run exercised the home screen, example link and message analyses, result display, and navigation.
+- A repository secret scan found no real credential in the scanned content; matches were code references, rule keywords, and documentation placeholders.
+
+These are historical results for the initial build, not claims of a new verification run during final documentation review.
+
+### Repository setup
+
+The Git repository was initialised on `main` and connected to the repository listed at the top of this document. The `.gitignore` was extended to exclude local secret configuration, signing files, and other generated or sensitive files. Gradle wrapper files were retained so a clean checkout could build the project.
+
+---
+
+## 2. Arabic Localisation — العربية
+
+Arabic localisation was added after the initial MVP. The English baseline was tagged as `mvp-baseline-v1` before localisation work began.
+
+### What was built
+
+- `lib/l10n/app_strings.dart`: the `AppStrings` contract and English strings.
+- `lib/l10n/app_strings_ar.dart`: Arabic interface strings and translated indicator wording.
+- `lib/l10n/strings_scope.dart`: an `InheritedWidget` carrying the active strings.
+- Root locale wiring, supported locales, and localisation delegates.
+- A runtime language selector on the home screen.
+- Arabic-aware indicator counts and display wording.
+- A detection-coverage note explaining that Arabic interface support does not mean Arabic scam detection.
+
+The engine continues to score the original rule output. Localisation changes the displayed wording rather than the underlying indicator IDs, severities, or risk level.
+
+### Why it was built this way
+
+- Localisation occurs at display time so the language setting cannot change detection behaviour.
+- Existing English wording and baseline tests were preserved wherever possible.
+- Flutter's built-in localisation support was preferred to an additional third-party localisation framework.
+- Arabic detection was not claimed because the rules still match English text.
+
+### Technical decisions
+
+| Decision             | Choice                                      | Reason                                                                |
+| -------------------- | ------------------------------------------- | --------------------------------------------------------------------- |
+| Localisation         | Hand-written`AppStrings` classes          | Two languages did not justify a code-generation workflow              |
+| RTL                  | Flutter localisation and directionality     | Lets Material widgets use the appropriate layout and built-in strings |
+| Language persistence | Session only                                | Avoids adding persistent storage for a minor preference               |
+| Arabic detection     | Not implemented; limitation shown in the UI | Avoids claiming functionality that does not exist                     |
+| Brand name           | Remains in Latin script                     | Preserves the product's name                                          |
+| AI prompt            | Remains English                             | AI is optional and the detection rules are English-only               |
+
+### AI contributions
+
+The AI teammate generated the string contract, Arabic and English string classes, localisation wiring, and UI updates. It also implemented Arabic count agreement and helped diagnose issues in imports, regular expressions, test declarations, and assertions.
+
+### Builder decisions
+
+The builder required that Arabic detection not be claimed and that the limitation be shown inside the application, not only in documentation. The builder also required a recoverable baseline before the localisation changes.
+
+### Rejected ideas
+
+- Adding `shared_preferences` solely to persist the language choice.
+- Claiming that Arabic scam messages were detected.
+- Adding unreviewed Arabic detection rules within the localisation task.
+- Adding a third-party localisation framework.
+- Translating the AI prompt in a way that could imply unsupported Arabic analysis.
+
+### Verification recorded for this phase
+
+- `flutter analyze` — no issues found.
+- `flutter test` — 81 tests passed, including the initial 50 and 31 localisation tests.
+- `flutter build web --release` — succeeded.
+- Browser checks verified runtime language switching, Arabic strings, RTL layout, and corresponding English restoration.
+- Android-device verification was not performed in this environment at that stage. Browser screenshots were unavailable through the headless setup; the recorded evidence was based on browser DOM/layout checks and automated tests.
+
+---
+
+## 3. Independent Code Review and Targeted Fixes
+
+An independent review identified possible detection and recommendation issues. The working instruction was to reproduce each suspected issue, fix confirmed defects only, preserve existing behaviour where appropriate, and avoid unnecessary refactoring.
+
+### Confirmed findings and changes
+
+The review covered several classes of issue:
+
+- Negation and security advice being confused with requests for credentials.
+- Curly apostrophes and line breaks affecting message interpretation.
+- One-time codes being treated as suspicious without considering whether the message actually requested them.
+- Pressure language being incorrectly treated as a prohibition.
+- Brand names embedded in longer hostname labels being missed.
+- URL query wording being mistaken for the path.
+- A less severe indicator hiding a more severe indicator with the same ID.
+- A fee mention plus a link escalating risk without a genuine request for money or private information.
+- Ordinary congratulations being misclassified as a fake prize.
+
+### What changed
+
+- Improved the distinction between security warnings and requests for sensitive information.
+- Normalised line breaks before splitting messages into clauses.
+- Required contextual evidence before treating a numeric code as a request.
+- Required prize context before raising a fake-prize indicator.
+- Improved matching for known brand labels with recognised credential wording.
+- Restricted path-related wording checks to the URL path rather than arbitrary query text.
+- Kept the most severe finding for a repeated indicator ID.
+- Required a genuine request for money or private information for the combined link/request signal.
+
+Each change was kept local and covered by regression tests where appropriate.
+
+### Additional money-claim indicator
+
+A focused follow-up addressed messages such as “Claim your 500 USD reward.” The rule looks for an imperative claim together with a concrete amount and currency marker.
+
+The catalogue grew from 40 to 41 indicators at that point: 24 URL groups, 15 message groups, and two indicators synthesised by the engine.
+
+Examples recorded during this investigation included:
+
+| Input                                    | Intended behaviour                                            |
+| ---------------------------------------- | ------------------------------------------------------------- |
+| `Claim your 500 USD reward.`           | Detect the money-claim indicator                              |
+| `Claim your 250 EUR prize.`            | Detect the money-claim indicator                              |
+| `Claim your 10% discount at checkout.` | Do not treat a percentage discount alone as a money claim     |
+| `I hold 3 ETH in my portfolio.`        | Do not treat a portfolio statement alone as a payment demand  |
+| `Congratulations on your new job!`     | Do not flag as a fake prize solely because of congratulations |
+
+### Recommendation accuracy fixes
+
+Further review found that the recommendation could refer to a link that was not present in the message, fail to tell users not to run an executable download, or overstate what a URL path proved about a destination page.
+
+The following changes were made:
+
+- Recommendations now consider whether a link exists in the input.
+- Executable-download indicators can produce advice not to download or run the file.
+- Path wording is described as a clue, not proof of the destination page's contents.
+- Money advice is driven by money-specific indicators rather than by all sensitive-information indicators.
+
+The scoring thresholds were not changed during this recommendation pass.
+
+### Verification recorded for the review rounds
+
+The log records multiple test-suite snapshots as the review progressed, including 132, 145, and later higher counts. These represent different stages, not competing claims about one test run. The most recent full-suite result is recorded in the final section.
+
+`flutter analyze` was recorded as passing during these rounds. Android-device testing was not available in the maintainer environment.
+
+### Rejected ideas
+
+- Treating every negation word as evidence that a message is safe.
+- Reintroducing broad substring matching for brand names.
+- Adding an unbounded official-domain allowlist instead of fixing matching behaviour.
+- Downgrading all query-parameter warnings as a class.
+- Rewriting the architecture or adding unrelated abstractions.
+- Claiming that the rules can prove a website or message is safe.
+
+### Known limitations retained
+
+- Brand matching uses known patterns and may miss creative impersonation spellings.
+- Some checkout or confirmation paths can still produce a low-severity warning.
+- The rules match English text only.
+- Pattern-based analysis can produce false positives and false negatives.
+
+---
+
+## 4. Challenge Card #1 — AI Resilience
+
+### What the challenge asked
+
+The challenge concerned a coding-assistant platform using Gemini APIs and requested a Google AI Studio fallback. The organiser clarified that the existing project should adapt to the challenge rather than abandon its core purpose.
+
+### Interpretation chosen
+
+Scam Detection Field retained its original purpose: helping users understand why a link or message may be suspicious.
+
+The product-level interpretation was that the analysis must remain useful when AI is unavailable. The deterministic engine already computes the risk level, indicators, and recommendation before the AI explanation is attempted. That behaviour was preserved.
+
+The challenge did not turn Scam Detection Field into a coding assistant. No coding-assistant feature was implemented.
+
+### What was missing
+
+Earlier, AI failure was handled without enough information to distinguish a timeout, a rate limit, a network error, or an unreadable response. The rule-based result survived, but the reason for the AI failure was not sufficiently observable.
+
+### What changed
+
+- Added typed AI failure categories for timeouts, network errors, rate limits, API errors, malformed responses, and unexpected failures.
+- Preserved the rule-based result when AI failed.
+- Added a translated explanation of AI fallback status to the result and copied report.
+- Added a developer diagnostic visible only in debug mode.
+- Avoided exposing raw provider responses or credentials.
+- Added tests to ensure that AI outcomes cannot change the risk level, indicators, or recommendation.
+
+### Google AI Studio native fallback
+
+The AI flow was later extended to make one further attempt against Google's native `generateContent` endpoint when an eligible primary request failure occurred.
+
+The two paths share the same prompt and configured key/model. The native endpoint is constructed only for Google's supported host. The fallback does not run when AI is unconfigured or when the primary request returns HTTP 429.
+
+The fallback is sequential and limited to one attempt per analysis. If both attempts fail, the rule-based result remains unchanged and the primary failure is reported.
+
+### AI configuration and model verification
+
+The earlier example configuration used `gemini-2.0-flash`, which was identified during the development period as no longer available. The configuration example and corresponding test fixture were updated to `gemini-3.8-flash`.
+
+The output-token budget was also increased to reduce the risk of an empty answer from a model that uses part of its output budget for reasoning. This was a precaution based on documented model behaviour, not a measured performance improvement.
+
+A committed `env.ai.example.ps1` template was added with an empty key field. The local `env.ai.ps1` is intended to be Git-ignored.
+
+### What stayed unchanged
+
+- Detection rules, scoring thresholds, and risk calculation.
+- The ordering of the analysis pipeline.
+- The recommendation generated by the deterministic engine.
+- The 20-second timeout per AI request.
+- Runtime/build configuration through `--dart-define`.
+- The existing `http` dependency.
+- The product's core purpose.
+
+### Rejected ideas
+
+- Replacing the application with a coding assistant.
+- Adding a second independent AI vendor solely to claim a second-provider fallback.
+- Showing raw provider errors to ordinary users.
+- Blind retries or retry loops.
+- Deploying an unverified backend proxy during the hackathon.
+
+### Verification and limitations
+
+The automated tests exercise both AI request formats through `MockClient`. They verify request structure, authentication headers, response parsing, failure handling, fallback selection, and preservation of the rule-based result.
+
+**These tests do not make live network requests and do not prove that the native fallback works against the real Google service.** The Google AI Studio native fallback has not been verified against the live service.
+
+The builder separately reported local tests using their own key on an Android phone and in a browser. These are user-reported development checks, not results independently reproduced by the maintainer environment.
+
+The submitted APK is documented as rules-only, without an embedded API key. AI explanations are not configured in that build.
+
+---
+
+## 5. Challenge Card #2 — Tester Feedback
+
+### What arrived
+
+Two genuine reports were received and documented in `feedback/README.md`. Commenters' names were withheld.
+
+| Report                             | Issue                                                                            |
+| ---------------------------------- | -------------------------------------------------------------------------------- |
+| A — tester studying cybersecurity | Random text entered in the Link tab returned LOW RISK                            |
+| B — website owner                 | LOW RISK was interpreted as confirmation that the website had no vulnerabilities |
+
+Both reports exposed a meaningful gap in the user experience.
+
+### Feedback A — invalid input was scored
+
+Previously, arbitrary text entered in the Link tab could produce zero indicators and therefore LOW RISK. This was misleading because the input had not been meaningfully checked as a website address.
+
+**Changes made:**
+
+- Added `validateLink()` to reject invalid standalone link input.
+- Added an `InvalidUrlException` so invalid links do not produce a risk level.
+- Validated the input before URL scoring.
+- Added a clear invalid-URL message in English and Arabic.
+- Preserved the user's text so it can be corrected.
+- Added a path to switch to Message analysis.
+- Added URL-validation unit tests and widget tests for validation and retry behaviour.
+
+The validator parses the address; it does not open or fetch it.
+
+Valid HTTP/HTTPS addresses and supported bare-domain forms remain eligible for analysis. Unsupported schemes, malformed addresses, missing hosts, and free text are rejected.
+
+The validator is deliberately stricter than a browser. Some uncommon or internationalised addresses may be rejected even when legitimate.
+
+### Feedback B — a link result was mistaken for a security scan
+
+The application never opened the destination, but the previous generic limitation text did not make the scope of the check clear enough.
+
+**Changes made:**
+
+- Added a link-specific scope note in English and Arabic.
+- Displayed the note in the result's analysis-information card.
+- Included the note in the copied report.
+- Clarified that LOW RISK means no common warning signs were found in the address, not that the website is safe or free of vulnerabilities.
+
+The app was not slowed down artificially, and no vulnerability-scanning functionality was added. The application still does not make network requests to the submitted website.
+
+### What stayed unchanged
+
+- Detection rules and risk-scoring thresholds.
+- The analysis order.
+- Message analysis behaviour.
+- The offline-first rule-based core.
+- The optional AI fallback implemented during Challenge Card #1.
+
+### Verification recorded for this round
+
+The final feedback-round log recorded:
+
+- `flutter analyze` — no issues found.
+- `flutter test` — 205 tests passed.
+- The test suite included URL validation, widget-level validation behaviour, and the existing detection, AI-handling, and localisation tests.
+- URL validation tests used parsing and pattern checks without fetching websites.
+- No new dependency was added.
+
+These are recorded test results for that development stage. They are not a claim that a new test run occurred during final documentation review.
+
+### Feedback artefacts
+
+`feedback/README.md` records the reports, the changes made, and the privacy approach. Supporting screenshots were listed in the original feedback-round log as not yet committed at that time. Their inclusion must be determined from the actual repository state at final submission; the historical entry is not evidence that they were later uploaded.
+
+---
+
+## 6. Finalisation — Historical Snapshots
+
+The following entries preserve the state recorded at the end of different development rounds. They are intentionally retained to document the development timeline. Statements that work was pending or uncommitted refer to those earlier snapshots, not necessarily to the final repository state.
+
+### End of the code-audit round
+
+- `flutter analyze` — no issues found.
+- `flutter test` — 153 tests passed at that snapshot.
+- Some localisation and review changes were still uncommitted.
+- The initial rollback tag `mvp-baseline-v1` still pointed to the earlier baseline.
+- No real API key or signing credential was intentionally added to the repository.
+
+### End of the AI-resilience round
+
+- `flutter analyze` — no issues found.
+- `flutter test` — 176 tests passed at that snapshot.
+- The suite used mock AI responses rather than live provider calls.
+- AI failure classification and fallback behaviour were covered by automated tests.
+- No live Gemini request was made by the automated test suite.
+
+### End of the Gemini configuration-verification round
+
+- `flutter analyze` — no issues found.
+- `flutter test` — 177 tests passed at that snapshot.
+- The Gemini OpenAI-compatible request contract was checked against the published API documentation.
+- The obsolete example model was replaced.
+- The local configuration template and Git-ignore behaviour were tested.
+- No live Gemini request was made in that round.
+
+### End of the debug-diagnostic and native-fallback round
+
+- `flutter analyze` — no issues found.
+- `flutter test` — 188 tests passed at that snapshot.
+- The suite covered the OpenAI-compatible primary path and Google AI Studio native fallback using `MockClient`.
+- The native fallback had not been tested against the live service.
+- Some files were recorded as modified and uncommitted at that historical point.
+- The local API-key configuration file was intended to remain ignored by Git.
+
+### End of the tester-feedback round
+
+- `flutter analyze` — no issues found.
+- `flutter test` — 205 tests passed at that snapshot.
+- URL validation and the link-scan scope note were implemented and covered by tests.
+- The test suite did not fetch websites or call live AI services.
+- The original feedback log recorded screenshots as not yet committed at that point.
+- Android-device testing was not part of the maintainer environment's automated evidence.
+
+The counts above are historical snapshots, not a single contradictory final result. The latest recorded full-suite count at the end of the feedback round was 205 tests.
+
+---
+
+## 7. Final Submission State
+
+**This section is the authoritative summary of the latest recorded submission state.** It supersedes earlier progress snapshots where they describe work as pending or uncommitted.
+
+### Repository
+
+- **Repository:** https://github.com/hibathafer/Grevix_ScamDetectionField
+- **Branch:** `main`
+- **Latest recorded commit:** `ab1c18f` — `feat: improve scam analysis and AI fallback`
+- **Git status at the last recorded check:** Working tree clean; local `main` was up to date with `origin/main`.
+- The final repository state should be rechecked before submission if any additional changes are made after this record.
+
+### Testing and analysis
+
+- **Latest recorded full test run:** 205 tests passed.
+- **Latest recorded static analysis:** `flutter analyze` reported no issues.
+- These are the latest recorded results available for this document. They are not claims that either command was rerun during this final documentation update.
+- The automated AI tests use mock clients and do not make live network requests.
+
+### AI verification
+
+- The OpenAI-compatible primary request and Google AI Studio native fallback have automated mock-based coverage.
+- The Google AI Studio native fallback has not been verified against the live service.
+- The builder separately reported running the app with their own key on a physical Android phone and in a browser. These are user-reported development checks, not independently reproduced automated evidence.
+- The submitted APK is documented as rules-only and does not contain an embedded AI API key.
+- AI explanations require separate configuration and network access.
+
+### Security and known limitations
+
+- No real API key should be committed to the public repository.
+- A build configured with an API key may embed it in the binary; such a build must not be distributed publicly.
+- The interface supports English and Arabic, but the detection rules match English text only.
+- The application analyses the URL string and does not visit or scan the destination website.
+- Pattern-based analysis can miss new scams and cannot guarantee that an input is safe.
+- Android-device verification by the maintainer environment was not available and is not claimed by the automated evidence.
+
+### Feedback evidence
+
+The feedback reports and resulting changes are documented in `feedback/README.md`. Whether the supporting screenshots are included in the final submission must be determined from the actual contents of the repository, rather than inferred from the earlier historical entries.
+
+### Final quality statement
+
+Scam Detection Field was built to help users understand warning signs in suspicious digital communication. The final product retains its deterministic analysis core, explains the signals it detects, provides practical recommendations, and states its limitations. Optional AI can add wording but does not control the risk assessment.
+
+The project documentation distinguishes implemented functionality, automated mock-based verification, user-reported development testing, and known limitations. No claim of perfect scam detection, live website scanning, or live verification of the Google AI Studio fallback is mad
+
+# Build Log — Scam Detection Field
+
 Factual development record for the Grevix AfterCode 24-hour hackathon.
 Entries are written as they happen. Nothing here is invented after the fact.
 
@@ -33,16 +527,16 @@ Entries are written as they happen. Nothing here is invented after the fact.
 A single-flow Flutter app: paste a link or a message → analyse → risk level →
 reasons → recommendation → limitation note.
 
-| Area | Built |
-| --- | --- |
-| Input screen | Link / Message tabs, example presets, validation, error states, "How it works" sheet |
-| Result screen | Risk header, signals list, AI card (optional), recommendation, "About this analysis", copy report |
-| URL rules | 21 check groups (brand impersonation, homograph, `@` trick, raw IP, shortener, TLD, sub-domains, dashes, digits, `http://`, ports, query credentials, downloads, encoding, length, ...) |
-| Message rules | 14 check groups (urgency, threats, secret requests, payment demands, release fees, prizes, impersonation, secrecy, too-good-to-be-true, click pressure, generic greeting, chain forwarding, off-platform contact) |
-| Combination rule | link + request for money/information in one message ⇒ strong signal |
-| Scoring | warning = 1 pt, critical = 5 pt; any critical ⇒ HIGH; ≥7 ⇒ HIGH; ≥2 ⇒ MEDIUM |
-| AI integration | optional OpenAI-compatible explanation with full error/fallback handling |
-| Tests | 50 tests: URL rules, message rules, input detection, engine, AI success/error/network/invalid-response paths, UI flow |
+| Area             | Built                                                                                                                                                                                                             |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Input screen     | Link / Message tabs, example presets, validation, error states, "How it works" sheet                                                                                                                              |
+| Result screen    | Risk header, signals list, AI card (optional), recommendation, "About this analysis", copy report                                                                                                                 |
+| URL rules        | 21 check groups (brand impersonation, homograph,`@` trick, raw IP, shortener, TLD, sub-domains, dashes, digits, `http://`, ports, query credentials, downloads, encoding, length, ...)                        |
+| Message rules    | 14 check groups (urgency, threats, secret requests, payment demands, release fees, prizes, impersonation, secrecy, too-good-to-be-true, click pressure, generic greeting, chain forwarding, off-platform contact) |
+| Combination rule | link + request for money/information in one message ⇒ strong signal                                                                                                                                              |
+| Scoring          | warning = 1 pt, critical = 5 pt; any critical ⇒ HIGH; ≥7 ⇒ HIGH; ≥2 ⇒ MEDIUM                                                                                                                                 |
+| AI integration   | optional OpenAI-compatible explanation with full error/fallback handling                                                                                                                                          |
+| Tests            | 50 tests: URL rules, message rules, input detection, engine, AI success/error/network/invalid-response paths, UI flow                                                                                             |
 
 > **Correction (added later, during the Arabic work):** the "21 check groups"
 > figure for URL rules is inaccurate — counting the rule call sites in
@@ -66,14 +560,14 @@ reasons → recommendation → limitation note.
 
 ### Important technical decisions
 
-| Decision | Choice | Reason |
-| --- | --- | --- |
-| State management | plain `StatefulWidget` + injected `AnalysisEngine` | Two screens, no shared state; a state-management package would be dead weight |
-| Dependencies | only `http` | Needed solely for the optional AI call; everything else is Flutter built-in |
-| Models | pure Dart (no Flutter import) | The whole pipeline is unit-testable without a device |
-| AI key | `--dart-define` only | Never appears in source or in the repository |
-| Package/folder name | `scam_detection_field`, id `com.grevix.scamdetectionfield` | The default `flutter_application_1` / `com.example.*` looks unfinished in a submission |
-| Scoring weights | 1 / 5 with "any critical ⇒ HIGH" | Simple enough to explain in one sentence during a demo |
+| Decision            | Choice                                                         | Reason                                                                                    |
+| ------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| State management    | plain`StatefulWidget` + injected `AnalysisEngine`          | Two screens, no shared state; a state-management package would be dead weight             |
+| Dependencies        | only`http`                                                   | Needed solely for the optional AI call; everything else is Flutter built-in               |
+| Models              | pure Dart (no Flutter import)                                  | The whole pipeline is unit-testable without a device                                      |
+| AI key              | `--dart-define` only                                         | Never appears in source or in the repository                                              |
+| Package/folder name | `scam_detection_field`, id `com.grevix.scamdetectionfield` | The default`flutter_application_1` / `com.example.*` looks unfinished in a submission |
+| Scoring weights     | 1 / 5 with "any critical ⇒ HIGH"                              | Simple enough to explain in one sentence during a demo                                    |
 
 ### What AI did
 
@@ -96,14 +590,14 @@ reasons → recommendation → limitation note.
 
 ### Rejected ideas (initial build)
 
-| Idea | Why rejected |
-| --- | --- |
-| Machine-learning classifier trained on scam messages | No labelled dataset available in the time window; a small model would be less explainable and less accurate than readable rules |
-| Numeric "87% confidence" score | Not honestly derivable; would misrepresent the method |
-| Live URL fetching / VirusTotal-style lookup | Would send the user's link to third parties and require an API key and network; contradicts the offline-first, no-link-opening rule |
-| Message history, favourites, profiles, auth | No value for the core flow; every minute spent here is a minute not spent on reliability |
-| Clipboard "paste" button | Native long-press paste already works; the button would need platform permission handling on Android |
-| Grammar/spelling quality scoring | Subjective, noisy, and unfair to non-native English speakers and to short messages |
+| Idea                                                 | Why rejected                                                                                                                        |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Machine-learning classifier trained on scam messages | No labelled dataset available in the time window; a small model would be less explainable and less accurate than readable rules     |
+| Numeric "87% confidence" score                       | Not honestly derivable; would misrepresent the method                                                                               |
+| Live URL fetching / VirusTotal-style lookup          | Would send the user's link to third parties and require an API key and network; contradicts the offline-first, no-link-opening rule |
+| Message history, favourites, profiles, auth          | No value for the core flow; every minute spent here is a minute not spent on reliability                                            |
+| Clipboard "paste" button                             | Native long-press paste already works; the button would need platform permission handling on Android                                |
+| Grammar/spelling quality scoring                     | Subjective, noisy, and unfair to non-native English speakers and to short messages                                                  |
 
 ### Verification performed (initial build)
 
@@ -149,16 +643,16 @@ first (`mvp-baseline-v1`) so this work is fully revertible.
 
 ### What was built
 
-| Area | Built |
-| --- | --- |
-| String contract | `lib/l10n/app_strings.dart` — abstract `AppStrings` + `EnglishStrings` |
-| Arabic strings | `lib/l10n/app_strings_ar.dart` — every user-facing string and all 40 indicator titles/explanations |
-| Scope plumbing | `lib/l10n/strings_scope.dart` — `InheritedWidget` carrying the active `AppStrings` |
-| Root wiring | `app.dart` holds the locale, `supportedLocales`, `localizationsDelegates`, injectable `initialStrings` for tests |
-| Language switcher | app-bar button on the home screen opening a bottom sheet (English / العربية) |
-| Engine boundary | `AnalysisEngine` accepts optional `strings` on the constructor and per call; scoring runs on untouched rule output, then indicators are mapped for display |
-| Rule params | `_hit()` gained a `params` map; 18 of the 24 URL-rule call sites now pass the values that the Arabic wording interpolates (host, brand, official domain, TLD, port, counts, ...) |
-| Coverage caveat | `detectionCoverageNote`, non-null in Arabic only, rendered on the home screen **and** repeated on the result screen |
+| Area              | Built                                                                                                                                                                                |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| String contract   | `lib/l10n/app_strings.dart` — abstract `AppStrings` + `EnglishStrings`                                                                                                        |
+| Arabic strings    | `lib/l10n/app_strings_ar.dart` — every user-facing string and all 40 indicator titles/explanations                                                                                |
+| Scope plumbing    | `lib/l10n/strings_scope.dart` — `InheritedWidget` carrying the active `AppStrings`                                                                                            |
+| Root wiring       | `app.dart` holds the locale, `supportedLocales`, `localizationsDelegates`, injectable `initialStrings` for tests                                                             |
+| Language switcher | app-bar button on the home screen opening a bottom sheet (English / العربية)                                                                                                  |
+| Engine boundary   | `AnalysisEngine` accepts optional `strings` on the constructor and per call; scoring runs on untouched rule output, then indicators are mapped for display                       |
+| Rule params       | `_hit()` gained a `params` map; 18 of the 24 URL-rule call sites now pass the values that the Arabic wording interpolates (host, brand, official domain, TLD, port, counts, ...) |
+| Coverage caveat   | `detectionCoverageNote`, non-null in Arabic only, rendered on the home screen **and** repeated on the result screen                                                          |
 
 ### Why it was built this way
 
@@ -175,14 +669,14 @@ first (`mvp-baseline-v1`) so this work is fully revertible.
 
 ### Important technical decisions
 
-| Decision | Choice | Reason |
-| --- | --- | --- |
-| Localisation mechanism | hand-written `AppStrings` classes, not `.arb` + `gen-l10n` | Two languages, one file each, no codegen step or build-time tooling |
-| RTL mechanism | `flutter_localizations` → pulls in `intl` | Only package added; first-party SDK, and Material widgets then get correct RTL for free |
-| Language persistence | **none** — session only | Persisting would require `shared_preferences`, a third-party dependency, for one preference |
-| Arabic detection | **not implemented**, and stated in the UI | Honest about the rules still matching English only |
-| Brand name | stays Latin in both languages | Proper noun, as is normal in Arabic apps |
-| AI prompt | stays English | AI is disabled in the default build; translating the prompt without Arabic rules would overstate support |
+| Decision               | Choice                                                          | Reason                                                                                                   |
+| ---------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Localisation mechanism | hand-written`AppStrings` classes, not `.arb` + `gen-l10n` | Two languages, one file each, no codegen step or build-time tooling                                      |
+| RTL mechanism          | `flutter_localizations` → pulls in `intl`                  | Only package added; first-party SDK, and Material widgets then get correct RTL for free                  |
+| Language persistence   | **none** — session only                                  | Persisting would require`shared_preferences`, a third-party dependency, for one preference             |
+| Arabic detection       | **not implemented**, and stated in the UI                 | Honest about the rules still matching English only                                                       |
+| Brand name             | stays Latin in both languages                                   | Proper noun, as is normal in Arabic apps                                                                 |
+| AI prompt              | stays English                                                   | AI is disabled in the default build; translating the prompt without Arabic rules would overstate support |
 
 ### What AI did
 
@@ -215,13 +709,13 @@ first (`mvp-baseline-v1`) so this work is fully revertible.
 
 ### Rejected ideas (localisation)
 
-| Idea | Why rejected |
-| --- | --- |
-| `shared_preferences` to remember the language | A third-party dependency and a storage permission surface for one preference; restart-to-English is documented instead |
-| Claiming Arabic scam detection | No Arabic rules exist. Claiming support the product does not have is worse than admitting the gap in the UI |
+| Idea                                                | Why rejected                                                                                                                                            |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `shared_preferences` to remember the language     | A third-party dependency and a storage permission surface for one preference; restart-to-English is documented instead                                  |
+| Claiming Arabic scam detection                      | No Arabic rules exist. Claiming support the product does not have is worse than admitting the gap in the UI                                             |
 | Writing Arabic detection rules as part of this task | Out of scope, untestable in the time available, and unreviewable for correctness; would also have changed detection behaviour, which had to stay frozen |
-| `easy_localization` / GetX / other l10n packages | Two languages do not justify a third-party framework |
-| Rewriting the AI prompt per language | AI is disabled by default; translating a prompt without Arabic rules would overstate capability |
+| `easy_localization` / GetX / other l10n packages  | Two languages do not justify a third-party framework                                                                                                    |
+| Rewriting the AI prompt per language                | AI is disabled by default; translating a prompt without Arabic rules would overstate capability                                                         |
 
 ### Verification performed (localisation)
 
@@ -272,21 +766,21 @@ test.
 
 ### What was confirmed
 
-| # | Reported suspicion | Reproduced? | What actually happened |
-| --- | --- | --- | --- |
-| 1 | `Never share your PIN…` flagged as a request | No (already guarded) | The existing guard was correct |
-| 2 | `Don't share your PIN…` with a curly apostrophe | **Yes** | The guard listed `don't` and `dont` but not `don’t`, so the negation was missed |
-| 3 | `Your OTP: 482913. Do not share it…` | **Yes — HIGH** | The bare `code: 1234` pattern fired on a code being *delivered to* the user |
-| 4 | `Please reply with\nyour OTP.` | **Yes — not detected** | Clauses were split on `\n`, breaking the request across two clauses |
-| 5 | `Don't forget to share your verification code…` | **Yes — suppressed** | Treated `don't … share` as a prohibition |
-| 6 | `Do not hesitate to provide your bank details.` | **Yes — suppressed** | Treated `do not … provide` as a prohibition |
-| 7 | `…unless you send your PIN.` / `…until you send your OTP.` | **Yes — suppressed** | `cannot` / `until` matched the prohibition window |
-| 8 | `Do not delay and send your password now.` | **Yes — suppressed** | `do not … send` matched |
-| 9 | `securepaypal.com` / `paypalsecure-login.com` missed | **Yes** | Label-exact brand matching no longer saw a brand in those labels |
-| 10 | `?q=update+account` raised a path checkpoint | **Yes** | Checkpoint wording was read from path *and* query |
-| 11 | Private IP then public IP in one message | **Yes — critical hidden** | Deduplication kept the *first* indicator per `id`, so an early warning hid a later critical |
-| 12 | `Pay a small fee…` + a link scored HIGH | **Yes** | `combined_link_request` escalated on **any** `fee_request` plus **any** URL |
-| 13 | `Congratulations on the new job!` scored HIGH | **Yes — CRITICAL** | `\bcongratulations\b` on its own was a fake-prize signal |
+| #  | Reported suspicion                                               | Reproduced?                      | What actually happened                                                                         |
+| -- | ---------------------------------------------------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------- |
+| 1  | `Never share your PIN…` flagged as a request                  | No (already guarded)             | The existing guard was correct                                                                 |
+| 2  | `Don't share your PIN…` with a curly apostrophe               | **Yes**                    | The guard listed`don't` and `dont` but not `don’t`, so the negation was missed          |
+| 3  | `Your OTP: 482913. Do not share it…`                          | **Yes — HIGH**            | The bare`code: 1234` pattern fired on a code being *delivered to* the user                 |
+| 4  | `Please reply with\nyour OTP.`                                 | **Yes — not detected**    | Clauses were split on`\n`, breaking the request across two clauses                           |
+| 5  | `Don't forget to share your verification code…`               | **Yes — suppressed**      | Treated`don't … share` as a prohibition                                                     |
+| 6  | `Do not hesitate to provide your bank details.`                | **Yes — suppressed**      | Treated`do not … provide` as a prohibition                                                  |
+| 7  | `…unless you send your PIN.` / `…until you send your OTP.` | **Yes — suppressed**      | `cannot` / `until` matched the prohibition window                                          |
+| 8  | `Do not delay and send your password now.`                     | **Yes — suppressed**      | `do not … send` matched                                                                     |
+| 9  | `securepaypal.com` / `paypalsecure-login.com` missed         | **Yes**                    | Label-exact brand matching no longer saw a brand in those labels                               |
+| 10 | `?q=update+account` raised a path checkpoint                   | **Yes**                    | Checkpoint wording was read from path*and* query                                             |
+| 11 | Private IP then public IP in one message                         | **Yes — critical hidden** | Deduplication kept the*first* indicator per `id`, so an early warning hid a later critical |
+| 12 | `Pay a small fee…` + a link scored HIGH                       | **Yes**                    | `combined_link_request` escalated on **any** `fee_request` plus **any** URL    |
+| 13 | `Congratulations on the new job!` scored HIGH                  | **Yes — CRITICAL**        | `\bcongratulations\b` on its own was a fake-prize signal                                     |
 
 ### What was fixed
 
@@ -337,14 +831,14 @@ requires `claim (your|this|a)` followed by a number **and** a currency marker.
 This takes the indicator catalogue from 40 to **41** (24 URL groups, 15 message
 groups, 2 synthesised by the engine).
 
-| Input | Result |
-| --- | --- |
-| `Claim your 500 USD reward.` | `money_claim`, **warning**, **LOW** |
-| `Claim your 250 EUR prize.` / `1,000 dollars` / `5000 IQD bonus` | detected, LOW |
-| `Congratulations on your new job!` | no signal |
-| `You earned a reward for completing your training.` | no signal |
-| `Claim your 10% discount at checkout.` | no signal — no currency marker |
-| `Claim your 500 points before they expire.` | no signal — loyalty points, not money |
+| Input                                                                  | Result                                            |
+| ---------------------------------------------------------------------- | ------------------------------------------------- |
+| `Claim your 500 USD reward.`                                         | `money_claim`, **warning**, **LOW** |
+| `Claim your 250 EUR prize.` / `1,000 dollars` / `5000 IQD bonus` | detected, LOW                                     |
+| `Congratulations on your new job!`                                   | no signal                                         |
+| `You earned a reward for completing your training.`                  | no signal                                         |
+| `Claim your 10% discount at checkout.`                               | no signal — no currency marker                   |
+| `Claim your 500 points before they expire.`                          | no signal — loyalty points, not money            |
 
 The indicator is translated into Arabic like every other one, and its title and
 explanation name the actual trigger rather than restating a severity.
@@ -356,15 +850,15 @@ Three of them had already been fixed in the uncommitted working tree and are
 pinned by tests here for the first time; the fourth was a genuine defect that
 had not been looked at before.
 
-| Reported by hand | State of the working tree | Action |
-| --- | --- | --- |
-| `Your OTP: 482913. Do not share it with anyone.` → HIGH | Already **LOW** | Regression test added |
-| `Congratulations on your new job!` → HIGH | Already **LOW**, no signals | Regression test added |
-| `https://example.com/page?ref=site.com` → "downloads a .com program" | Already clean, **LOW** | Regression test added |
-| `Claim your 500 USD reward.` → "No warning signs matched" | Already **LOW** with `money_claim` | Regression test added |
-| Advice mentions a link the input does not contain | **Confirmed defect** | Fixed |
-| Executable link not told not to download the file | **Confirmed defect** | Fixed |
-| `verify` path described as proof of the page's content | **Confirmed defect** | Fixed |
+| Reported by hand                                                        | State of the working tree                 | Action                |
+| ----------------------------------------------------------------------- | ----------------------------------------- | --------------------- |
+| `Your OTP: 482913. Do not share it with anyone.` → HIGH              | Already**LOW**                      | Regression test added |
+| `Congratulations on your new job!` → HIGH                            | Already**LOW**, no signals          | Regression test added |
+| `https://example.com/page?ref=site.com` → "downloads a .com program" | Already clean,**LOW**               | Regression test added |
+| `Claim your 500 USD reward.` → "No warning signs matched"            | Already**LOW** with `money_claim` | Regression test added |
+| Advice mentions a link the input does not contain                       | **Confirmed defect**                | Fixed                 |
+| Executable link not told not to download the file                       | **Confirmed defect**                | Fixed                 |
+| `verify` path described as proof of the page's content                | **Confirmed defect**                | Fixed                 |
 
 > The manual test was run against the committed build (`8f5aa52`), not against
 > the working tree. This is recorded rather than quietly re-tested, because the
@@ -433,15 +927,15 @@ take — a transfer verb, an amount and a ticker — was invisible to it.
 The fix requires a transfer verb, an amount and a ticker together, so it does
 not fire on `I hold 3 ETH in my portfolio.` or `We send daily reports at 5pm.`
 
-| Input | Before | After |
-| --- | --- | --- |
+| Input                                                   | Before                    | After                              |
+| ------------------------------------------------------- | ------------------------- | ---------------------------------- |
 | `Send 0.5 BTC to this wallet to release your parcel.` | **LOW, no signals** | **HIGH**, `payment_demand` |
-| `Pay 250 USDT now to unlock your account.` | **LOW, no signals** | **HIGH**, `payment_demand` |
-| `Transfer 0.05 ETH within 1 hour…` | LOW | HIGH |
-| `Deposit 1,000 USDT to claim your prize.` | LOW | HIGH |
-| `I hold 3 ETH in my portfolio.` | LOW | LOW ✅ unchanged |
-| `We send daily reports at 5pm.` | LOW | LOW ✅ unchanged |
-| `Buy gift cards and send me the codes now.` | HIGH | HIGH ✅ unchanged |
+| `Pay 250 USDT now to unlock your account.`            | **LOW, no signals** | **HIGH**, `payment_demand` |
+| `Transfer 0.05 ETH within 1 hour…`                   | LOW                       | HIGH                               |
+| `Deposit 1,000 USDT to claim your prize.`             | LOW                       | HIGH                               |
+| `I hold 3 ETH in my portfolio.`                       | LOW                       | LOW ✅ unchanged                   |
+| `We send daily reports at 5pm.`                       | LOW                       | LOW ✅ unchanged                   |
+| `Buy gift cards and send me the codes now.`           | HIGH                      | HIGH ✅ unchanged                  |
 
 **Also checked and deliberately left alone**
 
@@ -464,19 +958,17 @@ embedding a key in a distributed APK, which is extractable. The rule-based
 analysis is the product; AI remains an optional wording layer that never sets
 a risk level.
 
-
-
 ### Rejected ideas (code review)
 
-| Idea | Why rejected |
-| --- | --- |
-| Broad "any negation word means the message is safe" rule | Exactly the failure mode the review warned about; would have suppressed the pressure cases above |
-| A large official-domain allowlist to fix lookalikes | Substitutes a longer list for a correct matching rule, and is unbounded work |
-| Restoring substring matching for brand detection | Re-opens `pineapple` → Apple and `purchase` → Chase; the whole point of the review |
-| Blanket severity downgrades for query parameters such as `token`, `secret`, `pin` | Not examined as a class, and not applied — no change was made to those rules |
-| A narrow rule for `Claim your 500 USD reward.` at review time | Deferred; applied only after a separate, focused investigation showed a safe rule was possible |
-| Catching `appleid-verify.xyz` / `amazonsupport.top` as brand matches | Requires substring-style matching; left as a documented limitation |
-| Any redesign, new abstraction or performance work | Out of scope for a time-limited fix round |
+| Idea                                                                                   | Why rejected                                                                                     |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Broad "any negation word means the message is safe" rule                               | Exactly the failure mode the review warned about; would have suppressed the pressure cases above |
+| A large official-domain allowlist to fix lookalikes                                    | Substitutes a longer list for a correct matching rule, and is unbounded work                     |
+| Restoring substring matching for brand detection                                       | Re-opens`pineapple` → Apple and `purchase` → Chase; the whole point of the review          |
+| Blanket severity downgrades for query parameters such as`token`, `secret`, `pin` | Not examined as a class, and not applied — no change was made to those rules                    |
+| A narrow rule for`Claim your 500 USD reward.` at review time                         | Deferred; applied only after a separate, focused investigation showed a safe rule was possible   |
+| Catching`appleid-verify.xyz` / `amazonsupport.top` as brand matches                | Requires substring-style matching; left as a documented limitation                               |
+| Any redesign, new abstraction or performance work                                      | Out of scope for a time-limited fix round                                                        |
 
 ### Known limitations recorded during this round
 
@@ -547,14 +1039,14 @@ observable and diagnosable.
 
 ### What changed
 
-| File | Change | Why |
-| --- | --- | --- |
-| `lib/models/analysis_result.dart` | New `AiFailure` enum (`timeout`, `network`, `rateLimited`, `apiError`, `badResponse`, `unknown`) and a nullable `aiFailure` field on `AnalysisResult` | A fixed, secret-free category instead of an unexplained blank |
-| `lib/services/ai_explainer.dart` | Failures now throw a typed `AiException` instead of returning `null`. Transport errors, 429, other error statuses and four unreadable-body shapes are classified separately | A quota problem is not an outage; the two must not look identical |
-| `lib/analysis/analysis_engine.dart` | `on AiException` sets the category, a broad `catch` still falls back as `unknown`, and `debugPrint` writes the category | Diagnostics for developers without surfacing anything to the user |
-| `lib/l10n/app_strings.dart`, `app_strings_ar.dart` | New `aiFailureNote(AiFailure)` and `errorUnexpected`, in both languages | The reason must be readable, and must be translated like everything else |
-| `lib/screens/result_screen.dart` | The reason is shown under the fallback note, and is added to the copied report | A shared or screenshotted result must not hide the fallback |
-| `lib/screens/home_screen.dart` | The generic catch no longer reports `errorEmptyInput` | Telling a user "type something first" for a defect they did not cause is a false message |
+| File                                                   | Change                                                                                                                                                                         | Why                                                                                      |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| `lib/models/analysis_result.dart`                    | New`AiFailure` enum (`timeout`, `network`, `rateLimited`, `apiError`, `badResponse`, `unknown`) and a nullable `aiFailure` field on `AnalysisResult`         | A fixed, secret-free category instead of an unexplained blank                            |
+| `lib/services/ai_explainer.dart`                     | Failures now throw a typed`AiException` instead of returning `null`. Transport errors, 429, other error statuses and four unreadable-body shapes are classified separately | A quota problem is not an outage; the two must not look identical                        |
+| `lib/analysis/analysis_engine.dart`                  | `on AiException` sets the category, a broad `catch` still falls back as `unknown`, and `debugPrint` writes the category                                                | Diagnostics for developers without surfacing anything to the user                        |
+| `lib/l10n/app_strings.dart`, `app_strings_ar.dart` | New`aiFailureNote(AiFailure)` and `errorUnexpected`, in both languages                                                                                                     | The reason must be readable, and must be translated like everything else                 |
+| `lib/screens/result_screen.dart`                     | The reason is shown under the fallback note, and is added to the copied report                                                                                                 | A shared or screenshotted result must not hide the fallback                              |
+| `lib/screens/home_screen.dart`                       | The generic catch no longer reports`errorEmptyInput`                                                                                                                         | Telling a user "type something first" for a defect they did not cause is a false message |
 
 ### What stayed unchanged
 
@@ -588,12 +1080,12 @@ observable and diagnosable.
 
 ### Honesty of the claim
 
-| Category | Item |
-| --- | --- |
-| **Implemented and tested** | Deterministic analysis for links and messages; AI failure → unchanged rule-based result; classification of timeout / network / 429 / HTTP error / unreadable body / unrecognised; the reason rendered on screen and in the copied report, in English and Arabic |
-| **Implemented but not live-verified** | The AI request itself, on both endpoints. Every test drives a `MockClient`, so **the automated suite makes no live call at all**. The builder separately reports local runs with their own key (see *Google AI Studio fallback* below); the maintainer's environment has no key and no device, so no live call was reproduced there, and **the Google AI Studio fallback has never been exercised against a live service** |
-| **Simulated in tests** | Every provider answer: a 429, a 500, a timeout, an offline socket, malformed JSON, an empty `choices[]`, empty assistant text, and valid JSON in the wrong shape — now on the primary path *and* on the native fallback path |
-| **Not implemented** | Coding-assistant functionality; a backend proxy; blind automatic retries or a retry loop; **any second AI provider** — the fallback is Google's own native endpoint reached with the same key, not a different vendor |
+| Category                                    | Item                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Implemented and tested**            | Deterministic analysis for links and messages; AI failure → unchanged rule-based result; classification of timeout / network / 429 / HTTP error / unreadable body / unrecognised; the reason rendered on screen and in the copied report, in English and Arabic                                                                                                                                                                          |
+| **Implemented but not live-verified** | The AI request itself, on both endpoints. Every test drives a`MockClient`, so **the automated suite makes no live call at all**. The builder separately reports local runs with their own key (see *Google AI Studio fallback* below); the maintainer's environment has no key and no device, so no live call was reproduced there, and **the Google AI Studio fallback has never been exercised against a live service** |
+| **Simulated in tests**                | Every provider answer: a 429, a 500, a timeout, an offline socket, malformed JSON, an empty`choices[]`, empty assistant text, and valid JSON in the wrong shape — now on the primary path *and* on the native fallback path                                                                                                                                                                                                          |
+| **Not implemented**                   | Coding-assistant functionality; a backend proxy; blind automatic retries or a retry loop;**any second AI provider** — the fallback is Google's own native endpoint reached with the same key, not a different vendor                                                                                                                                                                                                               |
 
 ### Security note on the key
 
@@ -621,13 +1113,13 @@ last updated 9 October 2026).
 **Confirmed correct, so left alone.** The implementation already matches the
 documented contract exactly:
 
-| Contract element | Google documents | This project |
-| --- | --- | --- |
-| Base URL | `https://generativelanguage.googleapis.com/v1beta/openai/` | same |
-| Path | `POST …/chat/completions` | same, built by stripping the trailing slash and appending the segment |
-| Auth | `Authorization: Bearer <key>` | same (not `x-goog-api-key`, which belongs to the native API) |
-| Request body | `{"model": …, "messages": [{role, content}]}` | same, plus `temperature` and `max_tokens` |
-| Response | `choices[0].message.content` | same |
+| Contract element | Google documents                                             | This project                                                          |
+| ---------------- | ------------------------------------------------------------ | --------------------------------------------------------------------- |
+| Base URL         | `https://generativelanguage.googleapis.com/v1beta/openai/` | same                                                                  |
+| Path             | `POST …/chat/completions`                                 | same, built by stripping the trailing slash and appending the segment |
+| Auth             | `Authorization: Bearer <key>`                              | same (not`x-goog-api-key`, which belongs to the native API)         |
+| Request body     | `{"model": …, "messages": [{role, content}]}`             | same, plus`temperature` and `max_tokens`                          |
+| Response         | `choices[0].message.content`                               | same                                                                  |
 
 Both the link path and the message path reach it: `AnalysisEngine.analyze`
 calls the explainer once per submission, whatever the `InputKind`.
@@ -686,14 +1178,14 @@ once before it gives up on the explanation.
 
 **What changed.**
 
-| File | Change | Why |
-| --- | --- | --- |
-| `lib/services/ai_explainer.dart` | `explain()` split into an orchestrator plus `_explainPrimary`, `_explainNative`, `_postJson`, `_shouldFallBack` and `_nativeEndpoint` | The two paths share one prompt builder and one failure translator, so their error handling cannot drift apart |
-| `lib/services/ai_explainer.dart` | The native endpoint is derived from the configured base URL and built **only** for `generativelanguage.googleapis.com`, with the `/openai` suffix stripped | A non-Google OpenAI-compatible provider must never receive a Gemini-shaped request |
-| `lib/models/analysis_result.dart` | New nullable `aiFailureDetail` field beside `aiFailure` | The fixed enum cannot carry the detail a developer needs, e.g. `HTTP 404` |
-| `lib/screens/result_screen.dart` | An `AI diagnostic: …` line rendered only when `kDebugMode` is true, and never added to `buildReport` | Developers get the exact reason; nobody can copy a diagnostic into a shared report |
-| `lib/analysis/analysis_engine.dart` | Fills `aiFailureDetail` in both catch branches | The detail belongs where the exception is already classified |
-| `env.ai.example.ps1` | `-Device` default changed from `chrome` to empty, plus runtime selection of the first supported Android device via `flutter devices --machine`, falling back to `chrome` with a warning | The old default pinned every run to the browser even with a phone attached |
+| File                                  | Change                                                                                                                                                                                          | Why                                                                                                           |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `lib/services/ai_explainer.dart`    | `explain()` split into an orchestrator plus `_explainPrimary`, `_explainNative`, `_postJson`, `_shouldFallBack` and `_nativeEndpoint`                                               | The two paths share one prompt builder and one failure translator, so their error handling cannot drift apart |
+| `lib/services/ai_explainer.dart`    | The native endpoint is derived from the configured base URL and built**only** for `generativelanguage.googleapis.com`, with the `/openai` suffix stripped                             | A non-Google OpenAI-compatible provider must never receive a Gemini-shaped request                            |
+| `lib/models/analysis_result.dart`   | New nullable`aiFailureDetail` field beside `aiFailure`                                                                                                                                      | The fixed enum cannot carry the detail a developer needs, e.g.`HTTP 404`                                    |
+| `lib/screens/result_screen.dart`    | An`AI diagnostic: …` line rendered only when `kDebugMode` is true, and never added to `buildReport`                                                                                      | Developers get the exact reason; nobody can copy a diagnostic into a shared report                            |
+| `lib/analysis/analysis_engine.dart` | Fills`aiFailureDetail` in both catch branches                                                                                                                                                 | The detail belongs where the exception is already classified                                                  |
+| `env.ai.example.ps1`                | `-Device` default changed from `chrome` to empty, plus runtime selection of the first supported Android device via `flutter devices --machine`, falling back to `chrome` with a warning | The old default pinned every run to the browser even with a phone attached                                    |
 
 **How the fallback is selected.**
 
@@ -724,15 +1216,15 @@ Google's, reached with the same key and the same model.
 **Tests added** — seven, in `test/analysis_engine_test.dart`, all against
 `MockClient`, none opening a socket:
 
-| Test | What it pins down |
-| --- | --- |
-| primary HTTP failure rescued by the native fallback | exactly 2 requests, the OpenAI path then `…/models/<model>:generateContent`, `rulesAndAi`, `Authorization` on the primary, `x-goog-api-key` and an empty query string on the fallback |
-| transport failure on the primary is rescued as well | a thrown `ClientException` reaches the fallback too |
-| both the primary and the fallback fail | exactly 2 requests, `rulesWithAiFallback`, `HTTP 503` reported, level / indicators / recommendation identical to a no-AI run |
-| HTTP 429 never triggers the fallback | exactly **1** request, `rateLimited` |
-| missing configuration makes neither request | **0** requests, `rulesOnly`, no failure recorded |
-| the rules never change whatever the AI outcome is | level, indicators, advice and headline identical across primary success, fallback success, both failing, 429, and both timing out |
-| no failure detail from either path can carry the key | six failure shapes; the detail never contains the key, `Bearer`, `Authorization` or `goog-api-key` |
+| Test                                                 | What it pins down                                                                                                                                                                             |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| primary HTTP failure rescued by the native fallback  | exactly 2 requests, the OpenAI path then`…/models/<model>:generateContent`, `rulesAndAi`, `Authorization` on the primary, `x-goog-api-key` and an empty query string on the fallback |
+| transport failure on the primary is rescued as well  | a thrown`ClientException` reaches the fallback too                                                                                                                                          |
+| both the primary and the fallback fail               | exactly 2 requests,`rulesWithAiFallback`, `HTTP 503` reported, level / indicators / recommendation identical to a no-AI run                                                               |
+| HTTP 429 never triggers the fallback                 | exactly**1** request, `rateLimited`                                                                                                                                                   |
+| missing configuration makes neither request          | **0** requests, `rulesOnly`, no failure recorded                                                                                                                                      |
+| the rules never change whatever the AI outcome is    | level, indicators, advice and headline identical across primary success, fallback success, both failing, 429, and both timing out                                                             |
+| no failure detail from either path can carry the key | six failure shapes; the detail never contains the key,`Bearer`, `Authorization` or `goog-api-key`                                                                                       |
 
 **User-reported development testing — not automated, not reproduced here.**
 The builder reports having performed AI explanation tests on a physical
@@ -769,10 +1261,10 @@ who used the app. Both are recorded verbatim-by-paraphrase in
 [`feedback/README.md`](feedback/README.md), with the commenters' names
 withheld.
 
-| # | Reported by | The report |
-| --- | --- | --- |
-| A | A tester studying cybersecurity | Pasting random text into the **Link** tab returned **LOW RISK** instead of an invalid-input error |
-| B | A website owner | A reassuring result on his own websites read as *"free of any vulnerabilities"*; he also asked whether the scan really takes only a few seconds |
+| # | Reported by                     | The report                                                                                                                                       |
+| - | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A | A tester studying cybersecurity | Pasting random text into the**Link** tab returned **LOW RISK** instead of an invalid-input error                                     |
+| B | A website owner                 | A reassuring result on his own websites read as*"free of any vulnerabilities"*; he also asked whether the scan really takes only a few seconds |
 
 Both reports were correct. Neither was a style complaint.
 
@@ -782,21 +1274,20 @@ Both reports were correct. Neither was a style complaint.
 whatever the Link tab held. Free text produced zero indicators, zero points
 and therefore **LOW RISK** — a clean bill of health for a check that had
 never run. The old test at `analysis_engine_test.dart` even pinned this as
-intended behaviour (`a non-URL pasted into the link analysis still returns a
-result`); that test was **replaced**, not deleted, because it was asserting
+intended behaviour (`a non-URL pasted into the link analysis still returns a result`); that test was **replaced**, not deleted, because it was asserting
 the bug.
 
 **What changed.**
 
-| File | Change |
-| --- | --- |
-| `lib/analysis/input_classifier.dart` | New `validateLink()` returning `null` or a `UrlRejection` (`hasSpaces`, `unsupportedScheme`, `missingHost`, `malformed`). Pure parsing; **never opens the address** |
-| `lib/models/analysis_result.dart` | New `InvalidUrlException`, documented as producing no risk level |
-| `lib/analysis/analysis_engine.dart` | Validates **before** `analyzeLink()`, so the scorer is never reached with an invalid address |
-| `lib/screens/home_screen.dart` | Pre-checks with the same validator so the message appears without waiting, and offers the existing **Switch to Message** action. The typed text is left in the field, so the user can correct and retry |
-| `lib/l10n/app_strings.dart`, `app_strings_ar.dart` | New `errorInvalidUrl` in both languages: *"Invalid URL — Please enter a valid website link to analyze."* |
-| `test/url_validation_test.dart` | **New file**, 14 tests |
-| `test/app_test.dart` | +3 widget tests, including the correct-and-retry flow |
+| File                                                   | Change                                                                                                                                                                                                       |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `lib/analysis/input_classifier.dart`                 | New`validateLink()` returning `null` or a `UrlRejection` (`hasSpaces`, `unsupportedScheme`, `missingHost`, `malformed`). Pure parsing; **never opens the address**                       |
+| `lib/models/analysis_result.dart`                    | New`InvalidUrlException`, documented as producing no risk level                                                                                                                                            |
+| `lib/analysis/analysis_engine.dart`                  | Validates**before** `analyzeLink()`, so the scorer is never reached with an invalid address                                                                                                          |
+| `lib/screens/home_screen.dart`                       | Pre-checks with the same validator so the message appears without waiting, and offers the existing**Switch to Message** action. The typed text is left in the field, so the user can correct and retry |
+| `lib/l10n/app_strings.dart`, `app_strings_ar.dart` | New`errorInvalidUrl` in both languages: *"Invalid URL — Please enter a valid website link to analyze."*                                                                                                 |
+| `test/url_validation_test.dart`                      | **New file**, 14 tests                                                                                                                                                                                 |
+| `test/app_test.dart`                                 | +3 widget tests, including the correct-and-retry flow                                                                                                                                                        |
 
 **Accepted.** `http`/`https`, a bare domain, `www.`, an optional port, a raw
 IPv4 host and `localhost`. **Refused.** Free text, `ftp:`, `file:`,
@@ -851,12 +1342,12 @@ Message results do not show it, because they make no website claim.
 
 ### Honest status of this round
 
-| Category | Item |
-| --- | --- |
-| **Implemented and tested** | URL validation gate (14 unit tests + 3 widget tests); the refusal message in English and Arabic; the correct-and-retry flow; the link-scope note on screen and in the copied report |
-| **Implemented but not live-verified** | Nothing in this round makes a network request at all, so there is no live-service claim to make |
-| **Simulated in tests** | Every invalid shape: free text, malformed addresses, missing hosts, five unsupported schemes, and the port/host ambiguity (`localhost:8080`) |
-| **Not implemented** | Website or vulnerability scanning of any kind; a browser-grade URL parser; any new detection rule |
+| Category                                    | Item                                                                                                                                                                                |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Implemented and tested**            | URL validation gate (14 unit tests + 3 widget tests); the refusal message in English and Arabic; the correct-and-retry flow; the link-scope note on screen and in the copied report |
+| **Implemented but not live-verified** | Nothing in this round makes a network request at all, so there is no live-service claim to make                                                                                     |
+| **Simulated in tests**                | Every invalid shape: free text, malformed addresses, missing hosts, five unsupported schemes, and the port/host ambiguity (`localhost:8080`)                                      |
+| **Not implemented**                   | Website or vulnerability scanning of any kind; a browser-grade URL parser; any new detection rule                                                                                   |
 
 ### Documentation and artefacts
 
