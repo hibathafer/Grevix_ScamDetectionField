@@ -58,7 +58,15 @@ abstract class AppStrings {
 
   String get errorEmptyInput;
 
-  String get errorLinkContainsSpaces;
+  /// Shown when the Link tab is given something that is not a website
+  /// address - free text, a malformed address, a missing host, or a scheme
+  /// other than http/https. Nothing is scored in that case, so no risk level
+  /// is produced.
+  ///
+  /// Replaces the old `errorLinkContainsSpaces`: one message for every
+  /// invalid link is clearer than three, and the Message tab is offered
+  /// separately by the error box.
+  String get errorInvalidUrl;
 
   /// Shown when analysis fails for a reason that is neither an empty input
   /// nor a malformed link - so the user is never told "type something first"
@@ -130,6 +138,14 @@ abstract class AppStrings {
   String get reportCopied;
 
   String get limitationNote;
+
+  /// Rendered **only** for a link result, in the "About this analysis" card.
+  ///
+  /// A tester read a reassuring LOW RISK on his own website as "free of
+  /// vulnerabilities". This says in one sentence what the app actually did -
+  /// read the address, never open the site - so the result cannot be read as
+  /// a security scan.
+  String get linkScanScopeNote;
 
   /// `analysedAt` is already formatted as `HH:MM` in 24-hour local time.
   String analysedAt(String time, int checks);
@@ -287,9 +303,8 @@ class EnglishStrings extends AppStrings {
   String get errorEmptyInput => 'Paste or type something to analyse first.';
 
   @override
-  String get errorLinkContainsSpaces =>
-      'A website address should not contain spaces. Switch to the Message '
-      'tab to analyse a full message.';
+  String get errorInvalidUrl =>
+      'Invalid URL — Please enter a valid website link to analyze.';
 
   @override
   String get errorUnexpected =>
@@ -397,6 +412,13 @@ class EnglishStrings extends AppStrings {
       'Limitation: this result highlights common warning signs. It cannot '
       'prove that something is safe, and it does not open or download any '
       'link. Always verify unexpected requests through an official channel.';
+
+  @override
+  String get linkScanScopeNote =>
+      'This is not a security scan. The app reads the web address only and '
+      'never opens or tests the website, so LOW RISK means no common warning '
+      'signs were found in the link - not that the site is safe or free of '
+      'vulnerabilities.';
 
   @override
   String analysedAt(String time, int checks) =>

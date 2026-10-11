@@ -85,6 +85,9 @@ user input
    │
    ├── input detection (link vs. message, links inside a message)
    │
+   ├── URL validation (Link tab only) ── input_classifier.dart
+   │        not a website address → "Invalid URL", NO risk level
+   │
    ├── deterministic rules  ── url_rules.dart / message_rules.dart
    │        each match → Indicator {title, explanation, severity, source}
    │
@@ -106,6 +109,21 @@ The score is intentionally simple so it can be explained. The app does **not**
 display a "confidence percentage", because no such number would be honest
 here.
 
+**Input is validated before it is scored.** In the Link tab, free text, a
+malformed address, an address with no host, and any scheme other than
+`http`/`https` are refused with *"Invalid URL — Please enter a valid website
+link to analyze."* — no risk level is produced, because **LOW RISK on input
+that was never checked reads as a clean bill of health**. `validateLink()`
+parses the address and never opens it. Message analysis is unaffected: it has
+its own rules and does not depend on URL validation.
+
+**A link result is not a security scan.** The app reads the address only and
+never opens, visits or tests the website, so LOW RISK on a link means *no
+common warning signs were found in that address* — not that the site is safe
+or free of vulnerabilities. The result screen and the copied report both say
+so, because a tester read a reassuring LOW RISK on his own website as exactly
+that.
+
 ## AI usage
 
 AI is used where it genuinely adds value: turning a list of technical signals
@@ -113,12 +131,15 @@ into a short explanation an everyday person can follow.
 
 * The AI step sends the input, the risk level and the matched signals to an
   OpenAI-compatible chat-completions endpoint and asks for a short summary.
+  If that fails, one further attempt is made against Google AI Studio's
+  native `generateContent` endpoint before the explanation is given up on
+  (details below).
 * **The risk level, the reasons and the recommendation all come from the
   deterministic rules.** AI only adds wording.
 * Every response state is handled: not configured, HTTP error, timeout,
-  network failure, rate limit, malformed response. In all of those cases the
-  app falls back to the built-in explanations and says so in the UI
-  ("An AI explanation was requested but could not be completed").
+  network failure, rate limit, malformed response — on either endpoint. In
+  all of those cases the app falls back to the built-in explanations and says
+  so in the UI ("An AI explanation was requested but could not be completed").
 * **No API key is stored in this repository.** The key is passed at build or
   run time with `--dart-define`.
 
@@ -141,9 +162,15 @@ Copy the committed template, which contains no secret, and fill in the key:
 ```powershell
 copy env.ai.example.ps1 env.ai.ps1   # env.ai.ps1 is git-ignored
 # paste the key on the marked line inside env.ai.ps1
-.\env.ai.ps1                          # run in a browser
+.\env.ai.ps1                          # first connected Android device,
+                                      # or the browser if there is none
+.\env.ai.ps1 -Device chrome           # force a specific target instead
 .\env.ai.ps1 -BuildApk                # or build a private APK
 ```
+
+With no `-Device`, the script asks `flutter devices --machine` for the first
+supported Android target and uses it, so a plugged-in phone beats the
+browser; if none is found it prints a warning and opens Chrome.
 
 The equivalent by hand:
 
@@ -154,22 +181,51 @@ flutter run \
   --dart-define=AI_MODEL=gemini-3.8-flash
 ```
 
-The request shape is the one Google documents for that surface — `POST`
-`…/v1beta/openai/chat/completions`, an `Authorization: Bearer` header, a
+**Primary request.** The shape is the one Google documents for that surface —
+`POST` `…/v1beta/openai/chat/completions`, an `Authorization: Bearer` header, a
 `messages` array, and the answer read back from `choices[0].message.content` —
-and a test pins every one of those against a mock. Pick the model id from the
+and a test pins every one of those against a mock.
+
+**Fallback request.** If the primary fails with a timeout, a transport error,
+an error status (429 excepted) or a body it cannot read, **one** further
+attempt is made against Google AI Studio's native endpoint:
+`POST` `…/v1beta/models/<model>:generateContent`, authenticated with an
+`x-goog-api-key` header and answered from
+`candidates[0].content.parts[*].text`. It reuses the same key and the same
+model, and asks for exactly the same explanation through the same shared
+prompt, so a successful fallback cannot change what the AI is allowed to say.
+The fallback runs at most once per analysis, never in parallel with the
+primary, and never when AI is not configured. A **429 never reaches it** —
+the quota belongs to the credential, so a second call would only be rejected
+again. The native endpoint is derived from the configured base URL and is
+only built for `generativelanguage.googleapis.com`, so a non-Google
+OpenAI-compatible provider is never sent a Gemini-shaped request. If both
+attempts fail, the *primary's* failure is the one reported and the
+rule-based result stands unchanged.
+
+Pick the model id from the
 [Gemini model list](https://ai.google.dev/gemini-api/docs/models);
 `gemini-2.0-flash`, which this project used to suggest, was **shut down on
 1 June 2026**.
 
 Without these values the app runs on rules only, which is the default and the
-mode used in the submitted APK. **The Gemini path is wired and covered by
-tests that check the request shape against a mock client, but no live Gemini
-call has been made from this project** — no key is stored in this repository,
-in the source, or in any build artifact. A build made with a key embeds that
-key in the binary, and a web build serves it to anyone who opens the browser
-console, so such a build must never be distributed. Treat the rule-based
-analysis as the product and AI as an optional wording layer.
+mode used in the submitted APK. **The submitted `app-release.apk` contains no
+embedded API key, and AI explanations are not configured in that build** — it
+runs `rulesOnly`, from its built-in rules alone. No key is stored in this
+repository, in the source, or in any build artifact. A build made with a key
+embeds that key in the binary, and a web build serves it to anyone who opens
+the browser console, so such a build must never be distributed. Treat the
+rule-based analysis as the product and AI as an optional wording layer.
+
+**Testing status, stated plainly.** The automated suite - **205 tests** -
+exercises both AI request shapes against a `MockClient`, and the URL
+validation against real parsing. It performs no network call of any kind,
+consumes no quota, and is therefore *not* live-service testing. The builder
+separately reported running the app with their own key on a physical Android
+phone and in a browser; that is **user-reported development testing**,
+recorded in `BUILD_LOG.md` and not reproduced in the maintainer's environment,
+which has neither a device nor a key. **The Google AI Studio fallback has
+never been exercised against a live service** — only its mock tests exist.
 
 ### When AI is unavailable
 
@@ -191,13 +247,24 @@ timeout, an unreachable service, too many requests, an error status, or a
 reply the app could not read. The same note is included when the report is
 copied, so a shared or screenshotted result never hides a fallback.
 
-A failure carries only that fixed category. It never carries the key, the
-request URL, or a raw provider response. In debug builds the category is also
-written to the developer console, which is enough to tell a quota problem
-from an outage.
+The third row is reached only after **both** the primary request and the
+Google AI Studio fallback have failed (or after a single 429, which does not
+trigger the fallback at all). Whichever of the two produced the explanation,
+the risk level, the detected indicators and the recommendation are the ones
+the deterministic rules computed — the AI is only ever asked to word them.
 
-The request times out after 20 seconds, so the user is never left waiting
-indefinitely.
+A failure carries only that fixed category. It never carries the key, the
+request URL, or a raw provider response. In debug builds an extra
+`AI diagnostic:` line names the precise reason — `HTTP 404`, `StateError`,
+`no reply within the timeout` — and the category is also written to the
+developer console, which is enough to tell a quota problem from an outage.
+That line is drawn from `AnalysisResult.aiFailureDetail`, is rendered only
+when `kDebugMode` is true, and is never added to the copied report, so a
+release build shows it to no one and a shared report cannot carry it.
+
+Each attempt times out after 20 seconds. When the fallback also runs, the
+worst case is about 40 seconds, after which the rule-based result appears
+either way — the user is never left waiting indefinitely.
 
 ## Architecture
 
@@ -216,7 +283,9 @@ lib/
 │   ├── message_rules.dart          deterministic message checks
 │   ├── risk_scorer.dart            signals → LOW/MEDIUM/HIGH
 │   └── analysis_engine.dart        orchestration, recommendation, l10n mapping
-├── services/ai_explainer.dart      optional AI explanation (dart-define)
+├── services/ai_explainer.dart      optional AI explanation (dart-define),
+│                                    OpenAI-compatible primary + native
+│                                    Google AI Studio fallback
 ├── screens/
 │   ├── home_screen.dart            paste → analyse
 │   └── result_screen.dart          risk, reasons, advice, copy report
@@ -236,7 +305,7 @@ a device.
   built-in strings. It pulls in [`intl`](https://pub.dev/packages/intl)
   transitively, which is the only package added to `pubspec.lock`; no
   third-party package was added for localisation
-* Flutter built-in test framework - 177 tests
+* Flutter built-in test framework - 205 tests
 
 ## Setup
 
@@ -255,7 +324,7 @@ Test:
 
 ```bash
 flutter analyze             # static checks
-flutter test                # 177 tests (rules, engine, AI fallback, UI, l10n)
+flutter test                # 205 tests (rules, engine, AI fallback, URL validation, UI, l10n)
 ```
 
 Build the release APK:
@@ -337,6 +406,12 @@ from the language button in the app bar.
   translated into Arabic, but Arabic *content* is not analysed — an Arabic
   scam message can pass unflagged, and the app states this limitation
   directly in the UI rather than hiding it.
+* The URL validator is deliberately **stricter than a browser**. It accepts
+  `http`/`https`, a bare domain, `www.`, a raw IPv4 host and `localhost`, and
+  refuses everything else — so a very new gTLD outside `[a-z]{2,63}`, or an
+  internationalised domain typed in Unicode rather than punycode, is reported
+  as an invalid URL. Refusing a rare valid address is the safer error: the
+  alternative is scoring random text as a link.
 * The AI explanation requires network access and a configured key; it is not
   part of the default build.
 * Built and tested on Windows: the APK is produced and verified; the iOS
@@ -351,6 +426,25 @@ from the language button in the app bar.
 Recorded in [BUILD_LOG.md](BUILD_LOG.md) as each hackathon challenge card is
 received (what was asked, the interpretation chosen, what changed and why).
 
+## Feedback
+
+Real tester feedback and the changes made in response are recorded in
+[`feedback/README.md`](feedback/README.md). Two items have been acted on so
+far:
+
+1. **Random text in the Link tab returned LOW RISK.** Reported by a tester
+   studying cybersecurity. Now refused with an "Invalid URL" error, and no
+   risk level is produced. See [How it works](#how-it-works).
+2. **A reassuring LOW RISK on a real website was read as "free of
+   vulnerabilities."** Reported by a website owner, who also asked whether the
+   scan really takes only a few seconds. The answer is that there is no scan
+   of the site at all — the app reads the address only — and the result screen
+   and the copied report now say exactly that.
+
+The screenshots for both items are listed in
+[`feedback/README.md`](feedback/README.md) and still need to be committed by
+hand.
+
 ## Demo script
 
 1. **Problem** — show a realistic scam message (urgency + password + link).
@@ -360,7 +454,9 @@ received (what was asked, the interpretation chosen, what changed and why).
 5. **Advice** — the "What you should do" box.
 6. **Honesty** — point at the limitation note and the "About this analysis"
    section: the app never claims certainty.
-7. **Evolution** — *(challenge-specific step added in the build log)*.
+7. **Validation** — type a sentence into the *Link* tab and tap analyse:
+   the app refuses it with "Invalid URL" instead of inventing a risk level.
+8. **Evolution** — *(challenge-specific step added in the build log)*.
 
 ## License
 

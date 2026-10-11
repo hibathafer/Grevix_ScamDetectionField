@@ -133,6 +133,7 @@ class AnalysisResult {
     this.aiSummary,
     this.aiObservations = const [],
     this.aiFailure,
+    this.aiFailureDetail,
   });
 
   final RiskLevel riskLevel;
@@ -169,6 +170,14 @@ class AnalysisResult {
   /// carries a reason here.
   final AiFailure? aiFailure;
 
+  /// Short, safe technical detail behind that failure — an HTTP status code,
+  /// one of the fixed phrases in `AiExplainer`, or an exception type name.
+  ///
+  /// Never the API key, never the `Authorization` header, never a request
+  /// body and never a response body. Shown only as a developer diagnostic,
+  /// behind `kDebugMode`, so an ordinary user never has to read it.
+  final String? aiFailureDetail;
+
   /// Signals that actually raised the risk (warning + critical).
   List<Indicator> get reasons {
     final list = indicators
@@ -200,4 +209,17 @@ class EmptyInputException implements Exception {
 
   @override
   String toString() => 'Please paste or type something to analyse first.';
+}
+
+/// Thrown when the Link tab is given something that is not a website address.
+///
+/// Nothing is scored in this case, so an invalid URL **never receives a risk
+/// level**: reporting "LOW RISK" for free text would read as a clean bill of
+/// health for a check that never ran.
+class InvalidUrlException implements Exception {
+  const InvalidUrlException();
+
+  @override
+  String toString() =>
+      'Invalid URL - please enter a valid website link to analyse.';
 }

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../l10n/app_strings.dart';
@@ -11,9 +12,19 @@ import 'home_screen.dart';
 
 /// Shows the full, explainable result of one analysis.
 class ResultScreen extends StatelessWidget {
-  const ResultScreen({super.key, required this.result});
+  const ResultScreen({
+    super.key,
+    required this.result,
+    this.showDiagnostics = kDebugMode,
+  });
 
   final AnalysisResult result;
+
+  /// Whether the short technical reason for an AI fallback is shown.
+  ///
+  /// Defaults to [kDebugMode], so a release build never shows it. Tests pass
+  /// it explicitly to cover both branches.
+  final bool showDiagnostics;
 
   @override
   Widget build(BuildContext context) {
@@ -119,6 +130,24 @@ class ResultScreen extends StatelessWidget {
                         ),
                       ),
                     ],
+                    // Debug builds only: the exact reason, e.g. "HTTP 404" or
+                    // "ClientException". On the web this is far easier to
+                    // find than a debugPrint buried in the browser console.
+                    // `aiFailureDetail` is built from a status code, a fixed
+                    // phrase or an exception type - never the key, a header,
+                    // a request body or a response body.
+                    if (showDiagnostics && result.aiFailureDetail != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        'AI diagnostic: ${result.aiFailureDetail}',
+                        key: const ValueKey('ai-failure-diagnostic'),
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          height: 1.4,
+                          color: Color(0xFF9AA6B6),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 10),
                     Text(
                       l10n.limitationNote,
@@ -128,6 +157,22 @@ class ResultScreen extends StatelessWidget {
                         color: Color(0xFF7A8798),
                       ),
                     ),
+                    // A link result is a *read of the address*, not a scan of
+                    // the site. A tester read a reassuring LOW RISK on his own
+                    // website as "free of vulnerabilities", so say plainly what
+                    // was and was not checked.
+                    if (result.kind == InputKind.link) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        l10n.linkScanScopeNote,
+                        key: const ValueKey('link-scan-scope-note'),
+                        style: const TextStyle(
+                          fontSize: 13,
+                          height: 1.5,
+                          color: Color(0xFF7A8798),
+                        ),
+                      ),
+                    ],
                     // Repeat the language-coverage caveat on the result so a
                     // shared/screenshot result is never read out of context.
                     if (l10n.detectionCoverageNote != null) ...[
@@ -234,6 +279,11 @@ class ResultScreen extends StatelessWidget {
       ..writeln(result.recommendation)
       ..writeln()
       ..writeln('${l10n.reportNoteHeading} ${l10n.reportNoteBody}');
+    // Same honesty as the screen: a shared report must not let a link result
+    // be read as a website security scan.
+    if (result.kind == InputKind.link) {
+      buffer.writeln(l10n.linkScanScopeNote);
+    }
     return buffer.toString();
   }
 

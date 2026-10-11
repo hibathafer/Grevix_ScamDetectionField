@@ -11,8 +11,9 @@
     2. Paste your Gemini API key on the marked line below.
     3. From this folder run:
 
-           .\env.ai.ps1                # analyse in a browser with AI wording
-           .\env.ai.ps1 -Device windows   # ...or on a Windows device
+           .\env.ai.ps1                # first connected Android device
+           .\env.ai.ps1 -Device chrome    # ...or force the browser
+           .\env.ai.ps1 -Device windows   # ...or a Windows device
            .\env.ai.ps1 -BuildApk      # build a private APK that carries the key
 
   Where the key goes
@@ -30,9 +31,9 @@
 #>
 
 param(
-  # Browser is the quickest way to try a real request; use -Device windows,
-  # android or ios for a connected device instead.
-  [string]$Device = 'chrome',
+  # Empty targets the first connected Android device, falling back to the
+  # browser. Force a target with -Device chrome, windows, ios or a device id.
+  [string]$Device,
   [switch]$BuildApk
 )
 
@@ -67,5 +68,25 @@ Write-Host ''
 if ($BuildApk) {
   flutter build apk --release @defines
 } else {
+  if ([string]::IsNullOrWhiteSpace($Device)) {
+    # First connected Android device, so a plugged-in phone beats the
+    # browser. Only the device id is printed - never the key, never @defines.
+    try {
+      $machine = flutter devices --machine 2>$null | Out-String
+      if ($machine) {
+        foreach ($d in (ConvertFrom-Json -InputObject $machine)) {
+          if ($d.isSupported -and ($d.targetPlatform -like 'android*')) {
+            $Device = $d.id
+            break
+          }
+        }
+      }
+    } catch { }
+  }
+  if ([string]::IsNullOrWhiteSpace($Device)) {
+    Write-Host '  No Android device found - opening the browser instead.' -ForegroundColor Yellow
+    $Device = 'chrome'
+  }
+  Write-Host "  Target device: $Device"
   flutter run -d "$Device" @defines
 }

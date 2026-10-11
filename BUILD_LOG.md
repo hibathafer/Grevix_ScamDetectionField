@@ -457,7 +457,8 @@ The AI layer already speaks the OpenAI protocol, and Google exposes an
 OpenAI-compatible surface, so **no code change was required**. A test was added
 that drives a mock client with Gemini's base URL and model and asserts the
 request lands on `…/v1beta/openai/chat/completions` with the right model and
-that the response parses. **No live Gemini call was made**: no key exists in
+that the response parses. **No live Gemini call was made in this round**: no
+key exists in
 the repository or in any build, and verifying one end to end would mean
 embedding a key in a distributed APK, which is extractable. The rule-based
 analysis is the product; AI remains an optional wording layer that never sets
@@ -574,9 +575,13 @@ observable and diagnosable.
 * **Showing the raw provider response or the exception message to the user.**
   Rejected: it is confusing to a non-technical reader and is an unnecessary
   disclosure path.
-* **Retrying the AI call automatically.** Rejected for this phase: a retry
-  lengthens the wait for a result the user does not need, since the rule-based
-  answer is already complete when the call is made.
+* **Retrying the AI call automatically.** Rejected for this phase: a *blind*
+  retry lengthens the wait for a result the user does not need, since the
+  rule-based answer is already complete when the call is made. A later round
+  replaced this blanket rejection with a single, deliberately narrow fallback
+  to Google's own native endpoint — see *Google AI Studio fallback* below. It
+  is not a retry loop: it runs at most once per analysis, never for a 429, and
+  never without a configured key.
 * **A local proxy/backend to hold the key server-side.** Rejected for this
   phase: it cannot be deployed and verified inside the hackathon window, and
   an unverified deployment would be a worse claim than no deployment.
@@ -586,9 +591,9 @@ observable and diagnosable.
 | Category | Item |
 | --- | --- |
 | **Implemented and tested** | Deterministic analysis for links and messages; AI failure → unchanged rule-based result; classification of timeout / network / 429 / HTTP error / unreadable body / unrecognised; the reason rendered on screen and in the copied report, in English and Arabic |
-| **Implemented but not live-verified** | The AI request itself. It is exercised only through `MockClient`; **no live Gemini or OpenAI call has ever been made from this project** |
-| **Simulated in tests** | Every provider answer: a 429, a 500, a timeout, an offline socket, malformed JSON, an empty `choices[]`, empty assistant text, and valid JSON in the wrong shape |
-| **Not implemented** | Coding-assistant functionality; a backend proxy; automatic retries; any second AI provider |
+| **Implemented but not live-verified** | The AI request itself, on both endpoints. Every test drives a `MockClient`, so **the automated suite makes no live call at all**. The builder separately reports local runs with their own key (see *Google AI Studio fallback* below); the maintainer's environment has no key and no device, so no live call was reproduced there, and **the Google AI Studio fallback has never been exercised against a live service** |
+| **Simulated in tests** | Every provider answer: a 429, a 500, a timeout, an offline socket, malformed JSON, an empty `choices[]`, empty assistant text, and valid JSON in the wrong shape — now on the primary path *and* on the native fallback path |
+| **Not implemented** | Coding-assistant functionality; a backend proxy; blind automatic retries or a retry loop; **any second AI provider** — the fallback is Google's own native endpoint reached with the same key, not a different vendor |
 
 ### Security note on the key
 
@@ -655,16 +660,218 @@ calls the explainer once per submission, whatever the `InputKind`.
 
 **What remains unverified.**
 
-**No live Gemini request has been made.** There is no API key in this
-environment. Everything above is a contract check against Google's
-documentation plus deterministic tests with a mock client. A live call is a
-manual step for the person holding the key, using `env.ai.ps1`.
+**No live Gemini request has been made from this environment.** There is no
+API key here, and none of the automated tests opens a socket. Everything above
+is a contract check against Google's documentation plus deterministic tests
+with a mock client. A live call is a manual step for the person holding the
+key, using `env.ai.ps1`; the builder reports having run the app that way on
+their own machine, which is recorded below as **user-reported development
+testing** and not as a result of this suite.
 
 ---
 
-## 5. Challenge Card #2
+### Google AI Studio fallback round
 
-*Not yet received.*
+Two pieces of work are recorded together because they sit in the same
+uncommitted working tree: the **debug diagnostic** that names the failure
+reason, and the **Google AI Studio fallback** that gives the AI step a second
+way to reach Gemini.
+
+**Why.** Challenge Card #1 asks for a Google AI Studio fallback. The
+interpretation chosen at the start of section 4 still stands — this product is
+not a coding assistant — but the engineering half of the card is now
+implemented literally rather than only argued for: when the OpenAI-compatible
+request fails, the app tries Google's own native `generateContent` endpoint
+once before it gives up on the explanation.
+
+**What changed.**
+
+| File | Change | Why |
+| --- | --- | --- |
+| `lib/services/ai_explainer.dart` | `explain()` split into an orchestrator plus `_explainPrimary`, `_explainNative`, `_postJson`, `_shouldFallBack` and `_nativeEndpoint` | The two paths share one prompt builder and one failure translator, so their error handling cannot drift apart |
+| `lib/services/ai_explainer.dart` | The native endpoint is derived from the configured base URL and built **only** for `generativelanguage.googleapis.com`, with the `/openai` suffix stripped | A non-Google OpenAI-compatible provider must never receive a Gemini-shaped request |
+| `lib/models/analysis_result.dart` | New nullable `aiFailureDetail` field beside `aiFailure` | The fixed enum cannot carry the detail a developer needs, e.g. `HTTP 404` |
+| `lib/screens/result_screen.dart` | An `AI diagnostic: …` line rendered only when `kDebugMode` is true, and never added to `buildReport` | Developers get the exact reason; nobody can copy a diagnostic into a shared report |
+| `lib/analysis/analysis_engine.dart` | Fills `aiFailureDetail` in both catch branches | The detail belongs where the exception is already classified |
+| `env.ai.example.ps1` | `-Device` default changed from `chrome` to empty, plus runtime selection of the first supported Android device via `flutter devices --machine`, falling back to `chrome` with a warning | The old default pinned every run to the browser even with a phone attached |
+
+**How the fallback is selected.**
+
+1. AI not configured → `explain()` returns before any socket is opened, so
+   **neither request is made.**
+2. The primary runs first and always: `POST {base}/chat/completions`.
+3. If it succeeds, nothing else happens — the fallback is never attempted.
+4. If it fails, the failure category decides: `timeout`, `network`, `apiError`
+   (any status other than 200 and 429) and `badResponse` allow **one** native
+   attempt; `rateLimited` and `unknown` allow **none**. A 429 belongs to the
+   credential, so the same key would only be refused again, and retrying an
+   unclassified error is a guess.
+5. The native attempt runs at most once per analysis, strictly after the
+   primary, never in parallel, and only when the endpoint could be derived.
+6. If it also fails, the **primary's** failure is the one reported — it is the
+   configured path and the reason the fallback ran at all.
+7. In every case the engine returns the rule-based result unchanged.
+
+The native request carries the key in an `x-goog-api-key` **header**, never in
+the query string, so a transport error that quotes a URL cannot leak it.
+
+**What stayed unchanged.** Every rule, every threshold, the scoring order
+(level computed before the AI block), the recommendation, the 20-second
+per-request timeout, the `--dart-define` configuration, and `http` as the only
+third-party dependency. **No second AI provider was added** — both paths are
+Google's, reached with the same key and the same model.
+
+**Tests added** — seven, in `test/analysis_engine_test.dart`, all against
+`MockClient`, none opening a socket:
+
+| Test | What it pins down |
+| --- | --- |
+| primary HTTP failure rescued by the native fallback | exactly 2 requests, the OpenAI path then `…/models/<model>:generateContent`, `rulesAndAi`, `Authorization` on the primary, `x-goog-api-key` and an empty query string on the fallback |
+| transport failure on the primary is rescued as well | a thrown `ClientException` reaches the fallback too |
+| both the primary and the fallback fail | exactly 2 requests, `rulesWithAiFallback`, `HTTP 503` reported, level / indicators / recommendation identical to a no-AI run |
+| HTTP 429 never triggers the fallback | exactly **1** request, `rateLimited` |
+| missing configuration makes neither request | **0** requests, `rulesOnly`, no failure recorded |
+| the rules never change whatever the AI outcome is | level, indicators, advice and headline identical across primary success, fallback success, both failing, 429, and both timing out |
+| no failure detail from either path can carry the key | six failure shapes; the detail never contains the key, `Bearer`, `Authorization` or `goog-api-key` |
+
+**User-reported development testing — not automated, not reproduced here.**
+The builder reports having performed AI explanation tests on a physical
+Android phone (A201XM, Android 14, reached over wireless ADB) through
+`env.ai.ps1`, and separately in a browser. Earlier in the same work the builder
+also reported a timeout on that device and an error status in the browser,
+which is what motivated the failure classification and the debug diagnostic
+above. This is recorded **on the builder's report** and is kept strictly apart
+from the test suite: it needs a key and a device the repository does not carry,
+it is not reproducible from the repository alone, no log from it is quoted as
+a test result, and the maintainer's environment — which has neither a key nor
+an Android device — could not reproduce it.
+
+**What is still not verified.**
+
+* **The Google AI Studio fallback has never been called against the live
+  service.** Only its `MockClient` tests exist. The native request and response
+  shape was written from Google's published `generateContent` documentation,
+  not measured against the API, and no test in this repository consumes quota.
+* No Android device or emulator exists in the maintainer's environment, so no
+  device testing is claimed for the automated evidence.
+* The submitted APK is unchanged: **built without `--dart-define`, it carries
+  no embedded API key and AI explanations are not configured in it** — it runs
+  `rulesOnly`.
+
+---
+
+## 5. Challenge Card #2 — tester feedback round
+
+### What arrived
+
+Not a written card this time, but two genuine technical reports from people
+who used the app. Both are recorded verbatim-by-paraphrase in
+[`feedback/README.md`](feedback/README.md), with the commenters' names
+withheld.
+
+| # | Reported by | The report |
+| --- | --- | --- |
+| A | A tester studying cybersecurity | Pasting random text into the **Link** tab returned **LOW RISK** instead of an invalid-input error |
+| B | A website owner | A reassuring result on his own websites read as *"free of any vulnerabilities"*; he also asked whether the scan really takes only a few seconds |
+
+Both reports were correct. Neither was a style complaint.
+
+### Feedback A — invalid input was being scored
+
+**The defect.** `AnalysisEngine.analyze` called `analyzeLink(text)` for
+whatever the Link tab held. Free text produced zero indicators, zero points
+and therefore **LOW RISK** — a clean bill of health for a check that had
+never run. The old test at `analysis_engine_test.dart` even pinned this as
+intended behaviour (`a non-URL pasted into the link analysis still returns a
+result`); that test was **replaced**, not deleted, because it was asserting
+the bug.
+
+**What changed.**
+
+| File | Change |
+| --- | --- |
+| `lib/analysis/input_classifier.dart` | New `validateLink()` returning `null` or a `UrlRejection` (`hasSpaces`, `unsupportedScheme`, `missingHost`, `malformed`). Pure parsing; **never opens the address** |
+| `lib/models/analysis_result.dart` | New `InvalidUrlException`, documented as producing no risk level |
+| `lib/analysis/analysis_engine.dart` | Validates **before** `analyzeLink()`, so the scorer is never reached with an invalid address |
+| `lib/screens/home_screen.dart` | Pre-checks with the same validator so the message appears without waiting, and offers the existing **Switch to Message** action. The typed text is left in the field, so the user can correct and retry |
+| `lib/l10n/app_strings.dart`, `app_strings_ar.dart` | New `errorInvalidUrl` in both languages: *"Invalid URL — Please enter a valid website link to analyze."* |
+| `test/url_validation_test.dart` | **New file**, 14 tests |
+| `test/app_test.dart` | +3 widget tests, including the correct-and-retry flow |
+
+**Accepted.** `http`/`https`, a bare domain, `www.`, an optional port, a raw
+IPv4 host and `localhost`. **Refused.** Free text, `ftp:`, `file:`,
+`javascript:`, `mailto:`, `data:` and `ws:`, an address with no host, and
+anything whose last label cannot be a TLD (`3.14`, `a.b`, `999.1.1.1`).
+
+**What stayed unchanged, on purpose.**
+
+* Every rule, threshold and the scoring order. Validation is a *gate*, not a
+  rule.
+* `https://example.com` is still **LOW RISK**. That result was never evidence
+  of a defect, and valid behaviour was not altered to make a test differ.
+* Raw IP hosts such as `192.168.0.1` stay valid — the rules flag them on
+  purpose, and refusing them first would hide that signal.
+* Message analysis is independent of URL validation and is unaffected.
+
+**`errorLinkContainsSpaces` was removed**, not merely superseded: one message
+for every invalid link is clearer than three, and the Message tab is still
+offered by the error box. This is a **breaking change to the `AppStrings`
+interface** — any future third language must supply `errorInvalidUrl`.
+
+**Recorded limitation.** The validator is deliberately stricter than a
+browser. A gTLD outside `[a-z]{2,63}`, or an internationalised domain typed
+in Unicode rather than punycode, is refused as malformed. Refusing a rare
+valid address is the safer of the two errors; the alternative is scoring
+random text as a link.
+
+### Feedback B — a link result was read as a security scan
+
+**The defect.** Not a code defect but a communication one. The app never
+opens the site, yet the only thing standing between a LOW RISK result and
+"my website is clean" was a generic line saying the result "cannot prove that
+something is safe". Nothing said what *was* checked. The speed was itself the
+clue — there is no scan — and that went unexplained.
+
+**What changed.** A new `linkScanScopeNote`, in both languages, rendered only
+for a **link** result, in the "About this analysis" card and in the copied
+plain-text report:
+
+> This is not a security scan. The app reads the web address only and never
+> opens or tests the website, so LOW RISK means no common warning signs were
+> found in the link - not that the site is safe or free of vulnerabilities.
+
+Message results do not show it, because they make no website claim.
+
+**What deliberately did *not* change.**
+
+* The scan was **not slowed down**. Speed was never the problem, and adding
+  an artificial delay would have been theatre.
+* **No vulnerability scanning was added, and none is claimed.** The app still
+  performs no network request against the address.
+
+### Honest status of this round
+
+| Category | Item |
+| --- | --- |
+| **Implemented and tested** | URL validation gate (14 unit tests + 3 widget tests); the refusal message in English and Arabic; the correct-and-retry flow; the link-scope note on screen and in the copied report |
+| **Implemented but not live-verified** | Nothing in this round makes a network request at all, so there is no live-service claim to make |
+| **Simulated in tests** | Every invalid shape: free text, malformed addresses, missing hosts, five unsupported schemes, and the port/host ambiguity (`localhost:8080`) |
+| **Not implemented** | Website or vulnerability scanning of any kind; a browser-grade URL parser; any new detection rule |
+
+### Documentation and artefacts
+
+* `feedback/README.md` — both items, what changed, what did not, and the
+  privacy policy. Commenters are not named.
+* `feedback/screenshots/` — **six screenshots supplied by the builder are
+  listed but not committed.** They could not be written into the repository by
+  the tooling used, and must be added by hand, with each commenter's consent
+  confirmed first.
+* README: the input-validation step added to the *How it works* diagram, an
+  explicit "a link result is not a security scan" paragraph, a new *Feedback*
+  section, a URL-validator entry under *Known limitations*, and the test count
+  corrected to 205.
+* Historical test counts in earlier rounds were **left as they were** — 177,
+  176 and 153 are accurate for the rounds they belong to.
 
 ---
 
@@ -725,3 +932,71 @@ security review of the public repository, submission package.*
 * **No live Gemini request was made.** Still no API key in this environment.
   Nothing in this round is claimed to have been tested against the real API.
 * No new dependency. No rule, threshold or fallback behaviour was modified.
+
+**State at the end of the debug-diagnostic and Google AI Studio fallback
+round**
+
+* `flutter analyze` — **No issues found.**
+* `flutter test` — **188/188 passed** (up from 177; +11 tests: 4 for the debug
+  diagnostic — 2 in `analysis_engine_test.dart`, 2 in `l10n_test.dart` — and 7
+  for the Google AI Studio fallback in `analysis_engine_test.dart`). The
+  earlier `177/177` above is the historical count of the round it belongs to;
+  this line is the current one.
+* Test files now stand at `analysis_engine_test.dart` **30**,
+  `l10n_test.dart` **44**.
+* The whole suite is deterministic. **No test opens a network connection and no
+  test uses a real key** — every answer on both AI paths is a `MockClient`, so
+  no API quota is consumed.
+* Working tree: the change is complete and verified but **not committed**, and
+  nothing is staged. `HEAD` and the remote `main` both remain at `a8421bf`.
+  Seven files are modified: `env.ai.example.ps1`,
+  `lib/analysis/analysis_engine.dart`, `lib/models/analysis_result.dart`,
+  `lib/screens/result_screen.dart`, `lib/services/ai_explainer.dart`,
+  `test/analysis_engine_test.dart`, `test/l10n_test.dart`.
+* Rollback tag `mvp-baseline-v1` still points at `8f5aa52` and was not
+  overwritten.
+* No new dependency. No rule, no threshold and no scoring order was modified;
+  the level is still computed before the AI block runs.
+* **No API key is present** in the source, in the repository, in the committed
+  `env.ai.example.ps1`, or in this log. `env.ai.ps1` stays untracked.
+* **The fallback is not live-verified.** Its evidence is seven mock tests and
+  `flutter analyze` only. See *Google AI Studio fallback round* above.
+* **No Android device or emulator was available** in this environment, so
+  device testing is not claimed. The builder's phone runs are recorded as
+  user-reported development testing, not as automated results.
+
+**State at the end of the tester-feedback (Challenge Card #2) round**
+
+* `flutter analyze` — **No issues found.**
+* `flutter test` — **205/205 passed** (up from 188; +17: a new
+  `test/url_validation_test.dart` with 14 tests, and +3 widget tests in
+  `test/app_test.dart`). One pre-existing test was **replaced**, not deleted:
+  `a non-URL pasted into the link analysis still returns a result` was
+  asserting the defect the tester reported.
+* Test files now stand at `analysis_engine_test.dart` **30**,
+  `url_validation_test.dart` **14**, `l10n_test.dart` **44**,
+  `app_test.dart` **9** (6 `testWidgets`), `message_rules_test.dart` **25**,
+  `url_rules_test.dart` **18**, `review_regressions_test.dart` **62
+  statements / 65 cases** (one is inside a four-entry loop).
+* **No test opens a network connection.** `validateLink` parses an address
+  with `Uri` and a regex; it never fetches it, and no AI call is involved in
+  this round.
+* **Breaking change to the `AppStrings` interface:** `errorLinkContainsSpaces`
+  was removed and `errorInvalidUrl` and `linkScanScopeNote` were added. A
+  future third language must supply all three.
+* No rule, threshold or scoring order was modified. Validation is a gate in
+  front of `analyzeLink`, not a detection rule, and it only runs for
+  `InputKind.link`.
+* The Google AI Studio fallback from the previous round is **untouched**.
+* Working tree: complete and verified but **not committed**, nothing staged.
+  `HEAD` and the remote `main` both remain at `a8421bf`.
+* Rollback tag `mvp-baseline-v1` still points at `8f5aa52` and was not
+  overwritten.
+* No new dependency. No API key anywhere in the source, repository, committed
+  template or this log; `env.ai.ps1` stays untracked.
+* **Six feedback screenshots are listed but not committed** — see
+  `feedback/README.md`. They must be added by hand, with each commenter's
+  consent confirmed first.
+* **No Android device or emulator was available**, so device testing is not
+  claimed for this round either. Nothing in this round needed a device: the
+  change is pure Dart plus widget tests.

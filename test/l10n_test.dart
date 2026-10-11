@@ -84,7 +84,7 @@ void main() {
         arabic.linkFieldLabel,
         arabic.messageFieldLabel,
         arabic.errorEmptyInput,
-        arabic.errorLinkContainsSpaces,
+        arabic.errorInvalidUrl,
         arabic.analyseButton,
         arabic.analysingButton,
         arabic.switchToMessage,
@@ -102,6 +102,7 @@ void main() {
         arabic.copyReport,
         arabic.reportCopied,
         arabic.limitationNote,
+        arabic.linkScanScopeNote,
         arabic.languageSheetTitle,
         arabic.riskLabel(RiskLevel.low),
         arabic.riskLabel(RiskLevel.medium),
@@ -597,8 +598,12 @@ void main() {
     Future<void> pumpResult(
       WidgetTester tester,
       AnalysisResult result,
-      AppStrings strings,
-    ) async {
+      AppStrings strings, {
+      // The widget's own default is `kDebugMode`, which is true under test,
+      // so `true` is the faithful default here. Tests pass `false` to cover
+      // the release branch.
+      bool showDiagnostics = true,
+    }) async {
       await tester.pumpWidget(
         MaterialApp(
           home: Directionality(
@@ -609,7 +614,10 @@ void main() {
             child: StringsScope(
               strings: strings,
               onChanged: (_) {},
-              child: ResultScreen(result: result),
+              child: ResultScreen(
+                result: result,
+                showDiagnostics: showDiagnostics,
+              ),
             ),
           ),
         ),
@@ -695,6 +703,45 @@ void main() {
       await pumpResult(tester, result, english);
 
       expect(find.byKey(const ValueKey('ai-failure-note')), findsNothing);
+    });
+
+    testWidgets('the debug diagnostic names the exact failure reason',
+        (tester) async {
+      final result = await fallbackResult(english);
+      expect(result.aiFailure, AiFailure.rateLimited);
+      expect(result.aiFailureDetail, 'HTTP 429');
+
+      await pumpResult(tester, result, english);
+
+      expect(
+        find.byKey(const ValueKey('ai-failure-diagnostic')),
+        findsOneWidget,
+      );
+      expect(
+        find.text('AI diagnostic: HTTP 429'),
+        findsOneWidget,
+        reason: 'the status code is what tells a developer why it failed, '
+            'and on the web it is far easier to find here than in the '
+            'browser console',
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the diagnostic disappears when diagnostics are off',
+        (tester) async {
+      // Release builds make kDebugMode false, which is this same branch.
+      final result = await fallbackResult(english);
+
+      await pumpResult(tester, result, english, showDiagnostics: false);
+
+      expect(
+        find.byKey(const ValueKey('ai-failure-diagnostic')),
+        findsNothing,
+        reason: 'an ordinary user must never have to read a status code',
+      );
+      // The plain-language reason stays either way.
+      expect(find.byKey(const ValueKey('ai-failure-note')), findsOneWidget);
+      expect(tester.takeException(), isNull);
     });
 
     test('the copied report keeps the fallback status too', () async {

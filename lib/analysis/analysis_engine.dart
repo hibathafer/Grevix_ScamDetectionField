@@ -63,6 +63,10 @@ class AnalysisEngine {
     List<String> urls = const [];
 
     if (kind == InputKind.link) {
+      // Nothing is scored unless the input really is a website address. The
+      // check runs before `analyzeLink`, so an invalid URL never reaches the
+      // scorer and can never be given a risk level.
+      if (validateLink(text) != null) throw const InvalidUrlException();
       indicators.addAll(analyzeLink(text));
     } else {
       indicators.addAll(analyzeMessage(text));
@@ -149,6 +153,7 @@ class AnalysisEngine {
     String? aiSummary;
     var aiObservations = const <String>[];
     AiFailure? aiFailure;
+    String? aiFailureDetail;
 
     if (explainer.config.enabled) {
       try {
@@ -176,6 +181,7 @@ class AnalysisEngine {
         // from the key or a response body.
         mode = AnalysisMode.rulesWithAiFallback;
         aiFailure = e.failure;
+        aiFailureDetail = e.detail;
         debugPrint(
           'AI step skipped (${e.failure.name}'
           '${e.detail == null ? '' : ': ${e.detail}'}); '
@@ -187,6 +193,7 @@ class AnalysisEngine {
         // or key can reach the log.
         mode = AnalysisMode.rulesWithAiFallback;
         aiFailure = AiFailure.unknown;
+        aiFailureDetail = e.runtimeType.toString();
         debugPrint(
           'AI step skipped (unhandled ${e.runtimeType}); '
           'returning the rule-based assessment.',
@@ -206,6 +213,7 @@ class AnalysisEngine {
       aiSummary: aiSummary,
       aiObservations: aiObservations,
       aiFailure: aiFailure,
+      aiFailureDetail: aiFailureDetail,
     );
   }
 }

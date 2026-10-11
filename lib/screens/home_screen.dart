@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../analysis/analysis_engine.dart';
+import '../analysis/input_classifier.dart';
 import '../app.dart';
 import '../l10n/strings_scope.dart';
 import '../models/analysis_result.dart';
@@ -55,8 +56,11 @@ class _HomeScreenState extends State<HomeScreen> {
       _setError(l10n.errorEmptyInput);
       return;
     }
-    if (_kind == InputKind.link && RegExp(r'\s').hasMatch(text)) {
-      _setError(l10n.errorLinkContainsSpaces);
+    // Same rule the engine applies, checked here so the user gets the
+    // message without waiting. One clear error covers free text, a malformed
+    // address, a missing host and an unsupported scheme alike.
+    if (_kind == InputKind.link && validateLink(text) != null) {
+      _setError(l10n.errorInvalidUrl);
       return;
     }
 
@@ -70,6 +74,19 @@ class _HomeScreenState extends State<HomeScreen> {
         kind: _kind,
         strings: l10n,
       );
+    } on InvalidUrlException {
+      // The Link tab was given something that is not a website address.
+      // Refuse it instead of scoring it: "LOW RISK" on free text reads as
+      // "you are safe" for a check that never ran. The text stays in the
+      // field so it can be corrected, and the Message tab is offered as the
+      // obvious fix for someone who pasted a whole message by mistake.
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = l10n.errorInvalidUrl;
+        });
+      }
+      return;
     } on EmptyInputException catch (e) {
       if (mounted) {
         setState(() {

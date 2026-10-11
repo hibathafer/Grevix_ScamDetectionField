@@ -127,4 +127,66 @@ void main() {
     expect(text, contains('HIGH RISK'));
     expect(text, contains('What to do:'));
   });
+
+  testWidgets(
+      'random text in the link tab shows an Invalid URL error, and the user '
+      'can correct it and retry', (tester) async {
+    await pumpApp(tester);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('input-field')),
+      'please call me back when you can',
+    );
+    await tapVisible(tester, find.byKey(const ValueKey('analyze-button')));
+
+    // Refused, not scored: no result screen and no risk level.
+    expect(find.byKey(const ValueKey('risk-label')), findsNothing);
+    expect(
+      find.text('Invalid URL — Please enter a valid website link to analyze.'),
+      findsOneWidget,
+    );
+    expect(find.text('Switch to Message'), findsOneWidget);
+
+    // The text is still in the field, so it can be corrected and retried.
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('input-field')),
+        matching: find.text('please call me back when you can'),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.enterText(
+      find.byKey(const ValueKey('input-field')),
+      'http://paypal-secure-login.verify-account.xyz/session/update',
+    );
+    await tapVisible(tester, find.byKey(const ValueKey('analyze-button')));
+
+    expect(find.text('HIGH RISK'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a valid link still works and says it is not a security scan',
+      (tester) async {
+    await pumpApp(tester);
+
+    await tapVisible(tester, find.text('Try a suspicious link'));
+    await tapVisible(tester, find.byKey(const ValueKey('analyze-button')));
+
+    expect(find.byKey(const ValueKey('link-scan-scope-note')), findsOneWidget);
+    expect(find.textContaining('free of vulnerabilities'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a message result makes no website-scan claim', (tester) async {
+    await pumpApp(tester);
+
+    await tapVisible(tester, find.text('Try a suspicious message'));
+    await tapVisible(tester, find.byKey(const ValueKey('analyze-button')));
+
+    expect(find.text('Message analysis'), findsOneWidget);
+    expect(find.byKey(const ValueKey('link-scan-scope-note')), findsNothing);
+    expect(find.textContaining('free of vulnerabilities'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }

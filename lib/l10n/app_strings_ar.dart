@@ -95,9 +95,8 @@ class ArabicStrings extends AppStrings {
   String get errorEmptyInput => 'الصق أو اكتب شيئاً أولاً ليتم تحليله.';
 
   @override
-  String get errorLinkContainsSpaces =>
-      'لا يمكن أن يحتوي رابط الموقع على مسافات. انتقل إلى تبويب "الرسالة" '
-      'لتحليل رسالة كاملة.';
+  String get errorInvalidUrl =>
+      'رابط غير صالح — يرجى إدخال رابط موقع صحيح لتحليله.';
 
   @override
   String get errorUnexpected =>
@@ -211,6 +210,12 @@ class ArabicStrings extends AppStrings {
       'تنبيه: تُبرز هذه النتيجة علامات تحذير شائعة فقط. لا تثبت أن شيئاً ما '
       'آمن، ولا تفتح أو تُنزّل أي رابط. تحقق دائماً من الطلبات غير '
       'المتوقعة عبر قناة رسمية.';
+
+  @override
+  String get linkScanScopeNote =>
+      'هذه ليست فحصاً للأمان. يقرأ التطبيق رابط الموقع فقط ولا يفتحه أو '
+      'يختبره، لذلك تعني المخاطة المنخفضة عدم وجود علامات تحذير شائعة في '
+      'الرابط — ولا تعني أن الموقع آمن أو خالٍ من الثغرات.';
 
   @override
   String analysedAt(String time, int checks) =>
