@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -160,25 +161,32 @@ void main() {
 
     test('the same code can drive an OpenAI-compatible Gemini endpoint',
         () async {
-      // Google exposes an OpenAI-compatible surface, so using Gemini needs no
-      // code change - only build-time configuration. This pins the request
-      // shape and the trailing-slash normalisation. It uses a mock client, so
-      // no network call is made and no real key is involved.
+      // Checked against Google's own "OpenAI compatibility" page
+      // (ai.google.dev/gemini-api/docs/openai): base URL
+      // https://generativelanguage.googleapis.com/v1beta/openai/, POST to
+      // /chat/completions, `Authorization: Bearer <key>`, a `messages` array,
+      // and the answer read back from choices[0].message.content.
+      //
+      // It uses a mock client, so no network call is made and no real key is
+      // involved.
       const geminiBase =
           'https://generativelanguage.googleapis.com/v1beta/openai/';
+      const geminiModel = 'gemini-3.8-flash';
       late Uri called;
+      late Map<String, String> sentHeaders;
+      late Map<String, dynamic> sentBody;
 
       final explainer = AiExplainer(
         const AiConfig(
           apiKey: 'not-a-real-key',
           baseUrl: geminiBase,
-          model: 'gemini-2.0-flash',
+          model: geminiModel,
         ),
         client: MockClient((request) async {
           called = request.url;
+          sentHeaders = request.headers;
+          sentBody = jsonDecode(request.body) as Map<String, dynamic>;
           expect(request.method, 'POST');
-          final body = jsonDecode(request.body) as Map<String, dynamic>;
-          expect(body['model'], 'gemini-2.0-flash');
           return http.Response(
             jsonEncode({
               'choices': [
@@ -213,8 +221,52 @@ void main() {
         reason: 'the trailing slash must not produce a doubled or missing '
             'path segment',
       );
+      expect(
+        sentHeaders['Authorization'],
+        'Bearer not-a-real-key',
+        reason: 'Gemini authenticates the OpenAI-compatible surface with a '
+            'Bearer token, not with an x-goog-api-key header',
+      );
+      expect(sentHeaders['Content-Type'], contains('application/json'));
+      expect(sentBody['model'], geminiModel,
+          reason: 'the model id must be passed through unchanged');
+      expect(sentBody['max_tokens'], greaterThanOrEqualTo(512),
+          reason: 'Gemini 3.x spends part of the output budget on internal '
+              'reasoning, so a tight cap can leave nothing for the answer');
+      expect(sentBody['messages'], isA<List>());
+      final roles =
+          (sentBody['messages'] as List).map((m) => (m as Map)['role']).toList();
+      expect(roles, containsAll(['system', 'user']));
+
       expect(explanation, isNotNull);
       expect(explanation!.summary, contains('plain-language summary'));
+    });
+
+    test('the committed AI config template carries no secret', () {
+      // env.ai.example.ps1 is the file a developer copies to fill in a key.
+      // It is committed, so it must stay empty - this test stops a real key
+      // from ever being pasted into it and pushed.
+      final file = File('env.ai.example.ps1');
+      expect(file.existsSync(), isTrue,
+          reason: 'the template must stay in the repository');
+
+      final text = file.readAsStringSync();
+      expect(text, isNot(contains(RegExp(r'AIza[0-9A-Za-z_\-]{30,}'))),
+          reason: 'a Google-style key must never appear in the template');
+      expect(text, isNot(contains(RegExp(r'sk-[0-9A-Za-z]{20,}'))),
+          reason: 'an OpenAI-style key must never appear in the template');
+
+      final assignment =
+          RegExp(r"\$GeminiApiKey\s*=\s*'([^']*)'").firstMatch(text);
+      expect(assignment, isNotNull,
+          reason: 'the template must keep the marked key line');
+      expect(assignment!.group(1), isEmpty,
+          reason: 'the committed template must ship with an empty key');
+
+      // And the file that would actually hold a real key must stay ignored.
+      final ignored = File('.gitignore').readAsStringSync();
+      expect(ignored, contains('env.ai.ps1'),
+          reason: 'the real config file must be git-ignored');
     });
 
     test('an API error falls back to the rules without crashing', () async {

@@ -52,3 +52,7 @@ app.*.map.json
 .env
 .env.*
 
+# Local AI credentials - never commit. Copy env.ai.example.ps1 to this name
+# and paste the key there; it stays on your machine.
+env.ai.ps1
+

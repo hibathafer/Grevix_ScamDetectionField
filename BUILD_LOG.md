@@ -602,6 +602,66 @@ the submitted APK stays rules-only.
 
 ---
 
+### Gemini verification round
+
+The Phase 2 work proved the *fallback*. This round checked whether the AI path
+itself would actually work against Gemini if a key were supplied, without
+making a live call.
+
+**What was checked, and against what.** Google's own pages — *OpenAI
+compatibility* (`ai.google.dev/gemini-api/docs/openai`, retrieved 11 October
+2026, page last updated 2 September 2026) and *Deprecations* (`…/deprecations`,
+last updated 9 October 2026).
+
+**Confirmed correct, so left alone.** The implementation already matches the
+documented contract exactly:
+
+| Contract element | Google documents | This project |
+| --- | --- | --- |
+| Base URL | `https://generativelanguage.googleapis.com/v1beta/openai/` | same |
+| Path | `POST …/chat/completions` | same, built by stripping the trailing slash and appending the segment |
+| Auth | `Authorization: Bearer <key>` | same (not `x-goog-api-key`, which belongs to the native API) |
+| Request body | `{"model": …, "messages": [{role, content}]}` | same, plus `temperature` and `max_tokens` |
+| Response | `choices[0].message.content` | same |
+
+Both the link path and the message path reach it: `AnalysisEngine.analyze`
+calls the explainer once per submission, whatever the `InputKind`.
+
+**What was genuinely broken, and was fixed.**
+
+1. **The documented model was dead.** The README told users to run
+   `--dart-define=AI_MODEL=gemini-2.0-flash`. Google's deprecation table shows
+   `gemini-2.0-flash` shut down on **1 June 2026** — before this round. Anyone
+   following the README today would have got an error and a silent fallback,
+   and would reasonably have concluded the integration was broken. The README
+   and the test fixture now use `gemini-3.8-flash`, the model Google's current
+   examples use, which has no announced shutdown date.
+2. **The output budget could starve the answer.** Gemini 3.x models think by
+   default and Google states reasoning counts towards the same output budget.
+   At `max_tokens: 400` a thinking model could spend the whole budget on
+   reasoning and return an empty `content`, which this project treats as a
+   failed reply. Raised to 1024. The reply stays short regardless, because the
+   prompt asks for 2-3 sentences and at most 3 observations. **This is a
+   precaution taken from Google's documented behaviour, not a measured result.**
+
+**What was added.**
+
+* `env.ai.example.ps1` — a committed template with an **empty** key line. Copy
+  it to `env.ai.ps1`, paste the key, run it. Typing `--dart-define` by hand
+  puts the key in shell history; the script avoids that.
+* `env.ai.ps1` added to `.gitignore`, verified with `git check-ignore`.
+* A test asserts the committed template contains no key-shaped string, that
+  its key line is empty, and that `.gitignore` really covers `env.ai.ps1`.
+
+**What remains unverified.**
+
+**No live Gemini request has been made.** There is no API key in this
+environment. Everything above is a contract check against Google's
+documentation plus deterministic tests with a mock client. A live call is a
+manual step for the person holding the key, using `env.ai.ps1`.
+
+---
+
 ## 5. Challenge Card #2
 
 *Not yet received.*
@@ -647,3 +707,21 @@ security review of the public repository, submission package.*
   `flutter analyze`.
 * **Live Gemini integration was not verified**, because no key exists in this
   environment and no live call was made. See Challenge Card #1 above.
+
+**State at the end of the Gemini verification round**
+
+* `flutter analyze` — **No issues found**.
+* `flutter test` — **177/177 passed** (+1: a test guarding the committed
+  AI config template against carrying a secret).
+* The integration contract was checked against Google's published *OpenAI
+  compatibility* and *Deprecations* pages on 11 October 2026. The endpoint,
+  auth scheme, request body and response parsing were already correct and were
+  left unchanged. Two things were wrong and were fixed: the README recommended
+  `gemini-2.0-flash`, shut down on 1 June 2026, and `max_tokens: 400` was too
+  small for Gemini 3.x thinking models.
+* Added `env.ai.example.ps1` (committed, empty key line) and git-ignored
+  `env.ai.ps1`, so a key can be supplied locally without reaching shell
+  history, a commit, or this log.
+* **No live Gemini request was made.** Still no API key in this environment.
+  Nothing in this round is claimed to have been tested against the real API.
+* No new dependency. No rule, threshold or fallback behaviour was modified.

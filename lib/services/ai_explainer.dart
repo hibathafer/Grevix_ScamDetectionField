@@ -25,11 +25,17 @@ class AiException implements Exception {
 
 /// Configuration for the optional AI explanation step.
 ///
-/// The key is never written to source code. It is injected at build/run time:
+/// The key is never written to source code. It is injected at build/run time
+/// with `--dart-define`, and the easiest way to supply it locally is to copy
+/// `env.ai.example.ps1` to the git-ignored `env.ai.ps1` and fill in the key
+/// there:
 ///
 /// ```
-/// flutter run --dart-define=AI_API_KEY=... --dart-define=AI_MODEL=gpt-4o-mini
+/// flutter run --dart-define=AI_API_KEY=... --dart-define=AI_MODEL=gemini-3.8-flash
 /// ```
+///
+/// A build made with a key carries that key inside the binary, so such a
+/// build must never be distributed.
 class AiConfig {
   const AiConfig({
     required this.apiKey,
@@ -112,7 +118,12 @@ class AiExplainer {
     final payload = {
       'model': config.model,
       'temperature': 0.2,
-      'max_tokens': 400,
+      // Thinking models (Gemini 3.x) count their internal reasoning towards
+      // the same output budget. At 400 a thinking model could spend the whole
+      // budget on reasoning and return an empty answer, which the parser
+      // treats as a failed reply. The answer stays short in practice anyway:
+      // the prompt asks for 2-3 sentences and at most 3 observations.
+      'max_tokens': 1024,
       'messages': [
         {
           'role': 'system',

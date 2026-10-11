@@ -133,23 +133,43 @@ flutter run \
 
 `AI_BASE_URL` accepts any OpenAI-compatible endpoint, so local or alternative
 providers can be used — including Gemini through Google's OpenAI-compatible
-surface:
+surface.
+
+**Recommended: a local script, so the key never lands in your shell history.**
+Copy the committed template, which contains no secret, and fill in the key:
+
+```powershell
+copy env.ai.example.ps1 env.ai.ps1   # env.ai.ps1 is git-ignored
+# paste the key on the marked line inside env.ai.ps1
+.\env.ai.ps1                          # run in a browser
+.\env.ai.ps1 -BuildApk                # or build a private APK
+```
+
+The equivalent by hand:
 
 ```bash
 flutter run \
   --dart-define=AI_API_KEY=<your-key> \
   --dart-define=AI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/ \
-  --dart-define=AI_MODEL=gemini-2.0-flash
+  --dart-define=AI_MODEL=gemini-3.8-flash
 ```
 
-Without these values the app runs on rules only, which is the default, the
-mode used in the submitted APK, and the only mode that has been verified end to
-end here. **The Gemini path is wired and covered by a test that checks the
-request shape against a mock client, but no live Gemini call has been made** —
-no key is stored in this repository, in the source, or in any build artifact,
-and verifying a live call would mean embedding a key in a distributed APK,
-which is extractable. Treat the rule-based analysis as the product and AI as
-an optional wording layer.
+The request shape is the one Google documents for that surface — `POST`
+`…/v1beta/openai/chat/completions`, an `Authorization: Bearer` header, a
+`messages` array, and the answer read back from `choices[0].message.content` —
+and a test pins every one of those against a mock. Pick the model id from the
+[Gemini model list](https://ai.google.dev/gemini-api/docs/models);
+`gemini-2.0-flash`, which this project used to suggest, was **shut down on
+1 June 2026**.
+
+Without these values the app runs on rules only, which is the default and the
+mode used in the submitted APK. **The Gemini path is wired and covered by
+tests that check the request shape against a mock client, but no live Gemini
+call has been made from this project** — no key is stored in this repository,
+in the source, or in any build artifact. A build made with a key embeds that
+key in the binary, and a web build serves it to anyone who opens the browser
+console, so such a build must never be distributed. Treat the rule-based
+analysis as the product and AI as an optional wording layer.
 
 ### When AI is unavailable
 
@@ -216,7 +236,7 @@ a device.
   built-in strings. It pulls in [`intl`](https://pub.dev/packages/intl)
   transitively, which is the only package added to `pubspec.lock`; no
   third-party package was added for localisation
-* Flutter built-in test framework - 176 tests
+* Flutter built-in test framework - 177 tests
 
 ## Setup
 
@@ -235,7 +255,7 @@ Test:
 
 ```bash
 flutter analyze             # static checks
-flutter test                # 176 tests (rules, engine, AI fallback, UI, l10n)
+flutter test                # 177 tests (rules, engine, AI fallback, UI, l10n)
 ```
 
 Build the release APK:
